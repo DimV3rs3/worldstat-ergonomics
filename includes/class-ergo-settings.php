@@ -16,6 +16,12 @@ class WSErgo_Settings {
 	public const OPTION_COEFFICIENTS      = 'wsergo_coefficients';
 	public const OPTION_AGGREGATION       = 'wsergo_aggregation';
 	public const OPTION_COUNTRY_VARIATION = 'wsergo_country_variation';
+	/** Источник индекса страны: макроданные (CSV платформы) или агрегация по городам (legacy). */
+	public const OPTION_COUNTRY_INDEX_SOURCE = 'wsergo_country_index_source';
+	/** Опорный год для рядов country_code+year в CSV макромодели. */
+	public const OPTION_MACRO_REFERENCE_YEAR = 'wsergo_macro_reference_year';
+	/** Число кластеров k-means для макромодели (по умолчанию 6). */
+	public const OPTION_MACRO_K_CLUSTERS     = 'wsergo_macro_k_clusters';
 	/** Сопоставление полей записи wsp_city → id показателя эргономики. */
 	public const OPTION_CITY_FIELD_MAP    = 'wsergo_city_field_map';
 
@@ -123,6 +129,24 @@ class WSErgo_Settings {
 	public static function get_country_variation(): string {
 		$mode = (string) get_option( self::OPTION_COUNTRY_VARIATION, 'city_direct' );
 		return in_array( $mode, [ 'city_direct', 'regions' ], true ) ? $mode : 'city_direct';
+	}
+
+	/**
+	 * @return string macro_datasets|city_aggregate
+	 */
+	public static function get_country_index_source(): string {
+		$mode = (string) get_option( self::OPTION_COUNTRY_INDEX_SOURCE, 'macro_datasets' );
+		return in_array( $mode, [ 'macro_datasets', 'city_aggregate' ], true ) ? $mode : 'macro_datasets';
+	}
+
+	public static function get_macro_reference_year(): int {
+		$y = (int) get_option( self::OPTION_MACRO_REFERENCE_YEAR, 2022 );
+		return max( 1900, min( 2100, $y ) );
+	}
+
+	public static function get_macro_k_clusters(): int {
+		$k = (int) get_option( self::OPTION_MACRO_K_CLUSTERS, 6 );
+		return max( 2, min( 12, $k ) );
 	}
 
 	/**

@@ -57,6 +57,7 @@ require_once WSERGO_DIR . 'includes/class-ergo-cpt.php';
 require_once WSERGO_DIR . 'includes/class-ergo-calculator.php';
 require_once WSERGO_DIR . 'includes/class-ergo-city-bridge.php';
 require_once WSERGO_DIR . 'includes/class-ergo-city-defaults.php';
+require_once WSERGO_DIR . 'includes/class-ergo-country-macro-calculator.php';
 require_once WSERGO_DIR . 'includes/class-ergo-data.php';
 require_once WSERGO_DIR . 'includes/class-ergo-renderer.php';
 require_once WSERGO_DIR . 'includes/class-ergo-admin.php';
@@ -113,7 +114,7 @@ add_action(
 						'label'       => 'Индекс эргономичности (страна)',
 						'type'        => 'number',
 						'unit'        => 'балл',
-						'description' => 'Население-взвешенное среднее по городам (T3): при наличии кварталов — по их индексам; иначе — по данным импорта Cities при включённой опции.',
+						'description' => 'По умолчанию — макроиндекс по CSV платформы (страновые ряды, k-means); альтернатива в настройках — агрегация по городам (население T3, кварталы или импорт Cities).',
 						'callback'    => [ 'WSErgo_Data', 'get_country_ergo_index' ],
 					],
 					'districts_count' => [
@@ -171,6 +172,39 @@ add_action(
 
 new WSErgo_CPT();
 new WSErgo_Admin();
+
+add_action(
+	'update_option_wsp_csv_files_revision',
+	static function () {
+		if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			WSErgo_Country_Macro_Calculator::flush_cache();
+		}
+	}
+);
+add_action(
+	'update_option_' . WSErgo_Settings::OPTION_MACRO_REFERENCE_YEAR,
+	static function () {
+		if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			WSErgo_Country_Macro_Calculator::flush_cache();
+		}
+	}
+);
+add_action(
+	'update_option_' . WSErgo_Settings::OPTION_MACRO_K_CLUSTERS,
+	static function () {
+		if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			WSErgo_Country_Macro_Calculator::flush_cache();
+		}
+	}
+);
+add_action(
+	'update_option_' . WSErgo_Settings::OPTION_COUNTRY_INDEX_SOURCE,
+	static function () {
+		if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			WSErgo_Country_Macro_Calculator::flush_cache();
+		}
+	}
+);
 
 add_action(
 	'plugins_loaded',

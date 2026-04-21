@@ -142,9 +142,23 @@ class WSErgo_Data {
 	}
 
 	/**
-	 * Население-взвешенное среднее по городам страны.
+	 * Индекс страны: по умолчанию — макромодель по CSV платформы (см. WSErgo_Country_Macro_Calculator);
+	 * опционально — агрегация по городам (legacy), см. настройки плагина.
 	 */
 	public static function get_country_ergo_index( string $iso2 ): float {
+		$iso2 = strtoupper( $iso2 );
+		if ( class_exists( 'WSErgo_Settings' ) && class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			if ( WSErgo_Settings::get_country_index_source() === 'macro_datasets' ) {
+				return WSErgo_Country_Macro_Calculator::get_index_for_iso2( $iso2 );
+			}
+		}
+		return self::get_country_ergo_index_from_cities( $iso2 );
+	}
+
+	/**
+	 * Legacy: население-взвешенное среднее по городам страны (и вариант через регионы).
+	 */
+	private static function get_country_ergo_index_from_cities( string $iso2 ): float {
 		$iso2   = strtoupper( $iso2 );
 		$cities = self::get_country_cities( $iso2 );
 		if ( empty( $cities ) ) {

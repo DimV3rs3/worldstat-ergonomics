@@ -129,6 +129,33 @@ class WSErgo_Admin {
 				'default'           => 'city_direct',
 			]
 		);
+		register_setting(
+			'wsergo_settings',
+			WSErgo_Settings::OPTION_COUNTRY_INDEX_SOURCE,
+			[
+				'type'              => 'string',
+				'sanitize_callback' => [ $this, 'sanitize_country_index_source' ],
+				'default'           => 'macro_datasets',
+			]
+		);
+		register_setting(
+			'wsergo_settings',
+			WSErgo_Settings::OPTION_MACRO_REFERENCE_YEAR,
+			[
+				'type'              => 'integer',
+				'sanitize_callback' => [ $this, 'sanitize_macro_reference_year' ],
+				'default'           => 2022,
+			]
+		);
+		register_setting(
+			'wsergo_settings',
+			WSErgo_Settings::OPTION_MACRO_K_CLUSTERS,
+			[
+				'type'              => 'integer',
+				'sanitize_callback' => [ $this, 'sanitize_macro_k_clusters' ],
+				'default'           => 6,
+			]
+		);
 	}
 
 	/**
@@ -137,6 +164,30 @@ class WSErgo_Admin {
 	public function sanitize_country_variation( $input ): string {
 		$mode = is_string( $input ) ? sanitize_key( $input ) : '';
 		return in_array( $mode, [ 'city_direct', 'regions' ], true ) ? $mode : 'city_direct';
+	}
+
+	/**
+	 * @param mixed $input
+	 */
+	public function sanitize_country_index_source( $input ): string {
+		$mode = is_string( $input ) ? sanitize_key( $input ) : '';
+		return in_array( $mode, [ 'macro_datasets', 'city_aggregate' ], true ) ? $mode : 'macro_datasets';
+	}
+
+	/**
+	 * @param mixed $input
+	 */
+	public function sanitize_macro_reference_year( $input ): int {
+		$y = is_numeric( $input ) ? (int) $input : 2022;
+		return max( 1900, min( 2100, $y ) );
+	}
+
+	/**
+	 * @param mixed $input
+	 */
+	public function sanitize_macro_k_clusters( $input ): int {
+		$k = is_numeric( $input ) ? (int) $input : 6;
+		return max( 2, min( 12, $k ) );
 	}
 
 	/**
@@ -897,7 +948,10 @@ class WSErgo_Admin {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
-		$mode = WSErgo_Settings::get_country_variation();
+		$mode         = WSErgo_Settings::get_country_variation();
+		$index_source = WSErgo_Settings::get_country_index_source();
+		$macro_year   = WSErgo_Settings::get_macro_reference_year();
+		$macro_k      = WSErgo_Settings::get_macro_k_clusters();
 		settings_errors();
 		?>
 		<div class="wrap">
@@ -909,13 +963,39 @@ class WSErgo_Admin {
 				<?php settings_fields( 'wsergo_settings' ); ?>
 				<table class="form-table">
 					<tr>
-						<th scope="row"><label for="wsergo_country_variation"><?php esc_html_e( 'Режим расчета', 'worldstat-ergonomics' ); ?></label></th>
+						<th scope="row"><label for="wsergo_country_index_source"><?php esc_html_e( 'Индекс страны (карта, метрики)', 'worldstat-ergonomics' ); ?></label></th>
+						<td>
+							<select id="wsergo_country_index_source" name="<?php echo esc_attr( WSErgo_Settings::OPTION_COUNTRY_INDEX_SOURCE ); ?>">
+								<option value="macro_datasets" <?php selected( $index_source, 'macro_datasets' ); ?>><?php esc_html_e( 'Макроданные (CSV платформы, без городов)', 'worldstat-ergonomics' ); ?></option>
+								<option value="city_aggregate" <?php selected( $index_source, 'city_aggregate' ); ?>><?php esc_html_e( 'Агрегация по городам (legacy)', 'worldstat-ergonomics' ); ?></option>
+							</select>
+							<p class="description">
+								<?php esc_html_e( 'Макроданные: страновые ряды из загруженных CSV (тип country / indicator), опорный год и k-means. Агрегация по городам: взвешивание по населению T3 и настройкам ниже.', 'worldstat-ergonomics' ); ?>
+							</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wsergo_macro_reference_year"><?php esc_html_e( 'Опорный год (макро)', 'worldstat-ergonomics' ); ?></label></th>
+						<td>
+							<input type="number" id="wsergo_macro_reference_year" name="<?php echo esc_attr( WSErgo_Settings::OPTION_MACRO_REFERENCE_YEAR ); ?>" value="<?php echo esc_attr( (string) $macro_year ); ?>" class="small-text" min="1900" max="2100" step="1" />
+							<p class="description"><?php esc_html_e( 'Год для выборки значений country_code + year в CSV (если в файле есть столбец года).', 'worldstat-ergonomics' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wsergo_macro_k_clusters"><?php esc_html_e( 'Число кластеров k-means (макро)', 'worldstat-ergonomics' ); ?></label></th>
+						<td>
+							<input type="number" id="wsergo_macro_k_clusters" name="<?php echo esc_attr( WSErgo_Settings::OPTION_MACRO_K_CLUSTERS ); ?>" value="<?php echo esc_attr( (string) $macro_k ); ?>" class="small-text" min="2" max="12" step="1" />
+							<p class="description"><?php esc_html_e( 'Нормализация min–max выполняется внутри кластера стран.', 'worldstat-ergonomics' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wsergo_country_variation"><?php esc_html_e( 'Режим агрегации по городам', 'worldstat-ergonomics' ); ?></label></th>
 						<td>
 							<select id="wsergo_country_variation" name="<?php echo esc_attr( WSErgo_Settings::OPTION_COUNTRY_VARIATION ); ?>">
 								<option value="city_direct" <?php selected( $mode, 'city_direct' ); ?>><?php esc_html_e( '1) Городской (как в начальной версии)', 'worldstat-ergonomics' ); ?></option>
 								<option value="regions" <?php selected( $mode, 'regions' ); ?>><?php esc_html_e( '2) Страновой (через регионы)', 'worldstat-ergonomics' ); ?></option>
 							</select>
-							<p class="description"><?php esc_html_e( 'Режим 1 сохраняет старую городскую логику. Режим 2 добавляет страновую агрегацию через регионы; для него используются настройки «Города → регион» и «Регионы → страна».', 'worldstat-ergonomics' ); ?></p>
+							<p class="description"><?php esc_html_e( 'Используется только при источнике «Агрегация по городам». Режим 1 — прямое взвешенное среднее по городам. Режим 2 — сначала по регионам, затем по стране; см. вкладку «Агрегация» в основных настройках.', 'worldstat-ergonomics' ); ?></p>
 						</td>
 					</tr>
 				</table>
@@ -1306,7 +1386,7 @@ class WSErgo_Admin {
 									<option value="pop_weighted" <?php selected( $agg['region_to_country'], 'pop_weighted' ); ?>><?php esc_html_e( 'По населению', 'worldstat-ergonomics' ); ?></option>
 									<option value="mean" <?php selected( $agg['region_to_country'], 'mean' ); ?>><?php esc_html_e( 'Среднее по регионам', 'worldstat-ergonomics' ); ?></option>
 								</select>
-								<p class="description"><?php esc_html_e( 'Индекс страны на карте в типичной конфигурации считается по городам; это правило для сценария «регион как промежуточный уровень».', 'worldstat-ergonomics' ); ?></p>
+								<p class="description"><?php esc_html_e( 'Если в «Эргономика стран» выбрана агрегация по городам и режим через регионы — это правило объединения регионов в страну. При макроданных по CSV страновой индекс городов не использует эту цепочку.', 'worldstat-ergonomics' ); ?></p>
 							</td>
 						</tr>
 					</table>
