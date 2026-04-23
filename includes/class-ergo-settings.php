@@ -297,12 +297,12 @@ class WSErgo_Settings {
 	 */
 	public static function get_macro_e_axis_weights(): array {
 		$defaults = [
-			'F'  => 0.25,
+			'F'  => 0.24,
 			'Cm' => 0.22,
-			'H'  => 0.09,
-			'A'  => 0.10,
-			'S'  => 0.20,
-			'Ct' => 0.13,
+			'H'  => 0.18,
+			'A'  => 0.14,
+			'S'  => 0.12,
+			'Ct' => 0.10,
 		];
 		$raw = get_option( self::OPTION_MACRO_E_AXIS_WEIGHTS, [] );
 		if ( ! is_array( $raw ) ) {

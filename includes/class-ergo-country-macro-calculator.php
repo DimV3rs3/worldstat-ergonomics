@@ -16,85 +16,69 @@ class WSErgo_Country_Macro_Calculator {
 	private const TRANSIENT_KEY = 'wsergo_macro_scores_bundle_v11';
 
 	/** Инкремент при изменении логики расчёта — сбрасывает устаревший transient без смены CSV. */
-	private const SCORE_BUNDLE_LOGIC = 15;
+	private const SCORE_BUNDLE_LOGIC = 20;
 
 	/** @var array<string, string>|null ISO2 => ISO3 из data/countries.json платформы */
 	private static $iso2_to_iso3_file_cache = null;
 
 	/** Признаки для k-means (вектор для кластеризации стран). */
 	private const CLUSTER_FEATURES = [
-		'pop_dens',
-		'urban_share',
-		'built_share',
-		'forest_share',
-		'big_city_ratio',
-		'big_city_dens',
-		'urban_cases_500k',
-		'avg_urban_dens_500k',
-		'pct_urban_500k',
-		'rail_dens',
-		'sustainable_cities',
-		'sdg_index_score',
-		'road_dens',
-		'industry_innovation_infrastructure',
-		'forest_area_per_capita',
+		'pop_density__psn_per_km_sq',
+		'urban_share_01',
 		'transport_dens',
-		'urban_land_per_urban_pop',
+		'forest_cover_01',
+		'renewable_energy__ptc',
+		'life_exp_total__years',
+		'pm25_exposure__mcg_per_m3',
+		'gdp_per_energy__ppp_per_kgoe',
 	];
 
 	/** Показатели, для которых min–max делается внутри кластера. */
 	private const NORMALIZE_WITHIN_CLUSTER = [
-		'pop_dens',
-		'urban_share',
-		'built_share',
-		'forest_share',
-		'big_city_ratio',
-		'big_city_dens',
-		'urban_cases_500k',
-		'avg_urban_dens_500k',
-		'pct_urban_500k',
-		'rail_dens',
-		'road_dens',
-		'forest_area_per_capita',
 		'transport_dens',
-		'urban_land_per_urban_pop',
-		'sustainable_cities',
-		'sdg_index_score',
-		'industry_innovation_infrastructure',
-		'peace_justice',
-		// Доп. признаки из широких CSV (country_code, year, несколько столбцов).
-		'urban_growth_pct',
-		'elec_access',
-		'broadband_per100',
-		'internet_pct',
-		'mobile_per100',
-		'lpi_score',
-		'lpi_infra',
-		'air_passengers',
-		'container_teu',
-		'protected_pct',
-		'pm25_ug_m3',
-		'ghg_per_capita',
-		'renew_energy_pct',
-		'clean_cooking_pct',
-		'water_prod_usd_m3',
-		'arable_pct',
-		'life_exp_years',
-		'mort_u5_per1000',
-		'mort_infant_per1000',
-		'mort_neo_per1000',
-		'sanitation_safe_pct',
-		'water_safe_pct',
-		'uhc_index',
-		'cpi_business',
-		'cpi_corruption',
-		'homicide_per100k',
-		'rnd_gdp_pct',
-		'hi_tech_exp_pct',
-		'energy_use_kg_oil_cap',
-		'energy_int_mj_gdp_ppp',
-		'gdp_per_energy_ppp',
-		'renew_elec_pct',
+		'air_departures__cnt',
+		'air_passengers__psn',
+		'internet_users__ptc',
+		'broadband__per_100_psn',
+		'mobile_subs__per_100_psn',
+		'secure_servers__per_1m_psn',
+		'gdp_per_energy__ppp_per_kgoe',
+		'clean_elec_share__ptc',
+		'fossil_elec_share__ptc',
+		'energy_use_per_cap__kgoe',
+		'pop_in_1m_aggl__ptc',
+		'urban_share_01',
+		'pop_density__psn_per_km_sq',
+		'pm25_exposure__mcg_per_m3',
+		'co2_per_capita__tonnes_per_psn',
+		'renewable_energy__ptc',
+		'freshwater_renew_per_cap__m3',
+		'protected_terrestrial__ptc',
+		'forest_cover_01',
+		'forest_per_capita_m2',
+		'agri_pressure',
+		'life_exp_total__years',
+		'health_system_capacity',
+		'wASH_access_index',
+		'access_electricity__ptc',
+		'infect_and_stress_burden',
+		'substance_burden',
+		'fixed_phone__per_100_psn',
+		'alcohol_total__liters_per_cap',
+		'tobacco_adult__ptc',
+		'age_dependency_proxy',
+		'fertility_rate__births_per_woman',
+		'net_migration__psn',
+		'big_city_ratio',
+		'urban_pop_growth__ptc',
+		'digital_access_index',
+		'debt_stress',
+		'military_exp__ptc_gdp',
+		'women_parliament_seats__ptc',
+		'fiscal_transparency_proxy',
+		'tax_revenue__ptc_gdp',
+		'rent_fuels',
+		'net_oda_received__ptc_gni',
 	];
 
 	/** Ключи стандартных рядов (country_code, year, value). */
@@ -132,58 +116,87 @@ class WSErgo_Country_Macro_Calculator {
 	public static function default_macro_axis_terms(): array {
 		return array(
 			'F'  => array(
-				array( 'signal' => 'pop_dens', 'invert' => true, 'weight' => 0.20 ),
-				array( 'signal' => 'urban_share', 'invert' => false, 'weight' => 0.15 ),
-				array( 'signal' => 'rail_dens', 'invert' => false, 'weight' => 0.20 ),
-				array( 'signal' => 'avg_urban_dens_500k', 'invert' => false, 'weight' => 0.15 ),
-				array( 'signal' => 'urban_cases_500k', 'invert' => false, 'weight' => 0.13 ),
-				array( 'signal' => 'road_dens', 'invert' => false, 'weight' => 0.12 ),
-				array( 'signal' => 'sdg9', 'invert' => false, 'weight' => 0.05 ),
+				array( 'signal' => 'transport_dens', 'invert' => false, 'weight' => 0.1120 ),
+				array( 'signal' => 'air_departures__cnt', 'invert' => false, 'weight' => 0.0840 ),
+				array( 'signal' => 'air_passengers__psn', 'invert' => false, 'weight' => 0.0840 ),
+				array( 'signal' => 'internet_users__ptc', 'invert' => false, 'weight' => 0.0960 ),
+				array( 'signal' => 'broadband__per_100_psn', 'invert' => false, 'weight' => 0.0800 ),
+				array( 'signal' => 'mobile_subs__per_100_psn', 'invert' => false, 'weight' => 0.0800 ),
+				array( 'signal' => 'secure_servers__per_1m_psn', 'invert' => false, 'weight' => 0.0640 ),
+				array( 'signal' => 'gdp_per_energy__ppp_per_kgoe', 'invert' => false, 'weight' => 0.0840 ),
+				array( 'signal' => 'clean_elec_share__ptc', 'invert' => false, 'weight' => 0.0600 ),
+				array( 'signal' => 'fossil_elec_share__ptc', 'invert' => true, 'weight' => 0.0600 ),
+				array( 'signal' => 'energy_use_per_cap__kgoe', 'invert' => true, 'weight' => 0.0360 ),
+				array( 'signal' => 'pop_in_1m_aggl__ptc', 'invert' => false, 'weight' => 0.0560 ),
+				array( 'signal' => 'urban_share_01', 'invert' => false, 'weight' => 0.0480 ),
+				array( 'signal' => 'pop_density__psn_per_km_sq', 'invert' => true, 'weight' => 0.0560 ),
 			),
 			'Cm' => array(
-				array( 'signal' => 'forest_share', 'invert' => false, 'weight' => 0.30 ),
-				array( 'signal' => 'built_share', 'invert' => true, 'weight' => 0.25 ),
-				array( 'signal' => 'big_city_dens', 'invert' => true, 'weight' => 0.20 ),
-				array( 'signal' => 'forest_area_per_capita', 'invert' => false, 'weight' => 0.10 ),
-				array( 'signal' => 'pop_dens', 'invert' => true, 'weight' => 0.10 ),
-				array( 'signal' => 'sdg11', 'invert' => false, 'weight' => 0.05 ),
+				array( 'signal' => 'pm25_exposure__mcg_per_m3', 'invert' => true, 'weight' => 0.1020 ),
+				array( 'signal' => 'co2_per_capita__tonnes_per_psn', 'invert' => true, 'weight' => 0.0850 ),
+				array( 'signal' => 'renewable_energy__ptc', 'invert' => false, 'weight' => 0.0680 ),
+				array( 'signal' => 'freshwater_renew_per_cap__m3', 'invert' => false, 'weight' => 0.0510 ),
+				array( 'signal' => 'protected_terrestrial__ptc', 'invert' => false, 'weight' => 0.0340 ),
+				array( 'signal' => 'forest_cover_01', 'invert' => false, 'weight' => 0.1100 ),
+				array( 'signal' => 'forest_per_capita_m2', 'invert' => false, 'weight' => 0.0770 ),
+				array( 'signal' => 'agri_pressure', 'invert' => true, 'weight' => 0.0330 ),
+				array( 'signal' => 'life_exp_total__years', 'invert' => false, 'weight' => 0.0780 ),
+				array( 'signal' => 'health_system_capacity', 'invert' => false, 'weight' => 0.0650 ),
+				array( 'signal' => 'wASH_access_index', 'invert' => false, 'weight' => 0.0650 ),
+				array( 'signal' => 'infect_and_stress_burden', 'invert' => true, 'weight' => 0.0312 ),
+				array( 'signal' => 'substance_burden', 'invert' => true, 'weight' => 0.0208 ),
+				array( 'signal' => 'fixed_phone__per_100_psn', 'invert' => false, 'weight' => 0.0720 ),
+				array( 'signal' => 'alcohol_total__liters_per_cap', 'invert' => true, 'weight' => 0.0630 ),
+				array( 'signal' => 'tobacco_adult__ptc', 'invert' => true, 'weight' => 0.0450 ),
 			),
 			'H'  => array(
-				array( 'signal' => 'urban_share', 'invert' => false, 'weight' => 0.20 ),
-				array( 'signal' => 'forest_share', 'invert' => false, 'weight' => 0.20 ),
-				array( 'signal' => 'pop_dens', 'invert' => true, 'weight' => 0.15 ),
-				array( 'signal' => 'pct_urban_500k', 'invert' => false, 'weight' => 0.15 ),
-				array( 'signal' => 'sdg11', 'invert' => false, 'weight' => 0.10 ),
-				array( 'signal' => 'big_city_ratio', 'invert' => true, 'weight' => 0.10 ),
-				array( 'signal' => 'transport_dens', 'invert' => false, 'weight' => 0.05 ),
-				array( 'signal' => 'urban_land_per_urban_pop', 'invert' => false, 'weight' => 0.05 ),
+				array( 'signal' => 'life_exp_total__years', 'invert' => false, 'weight' => 0.1350 ),
+				array( 'signal' => 'age_dependency_proxy', 'invert' => true, 'weight' => 0.0750 ),
+				array( 'signal' => 'fertility_rate__births_per_woman', 'invert' => true, 'weight' => 0.0450 ),
+				array( 'signal' => 'net_migration__psn', 'invert' => false, 'weight' => 0.0450 ),
+				array( 'signal' => 'urban_share_01', 'invert' => false, 'weight' => 0.0840 ),
+				array( 'signal' => 'pop_in_1m_aggl__ptc', 'invert' => false, 'weight' => 0.0700 ),
+				array( 'signal' => 'big_city_ratio', 'invert' => false, 'weight' => 0.0560 ),
+				array( 'signal' => 'pop_density__psn_per_km_sq', 'invert' => true, 'weight' => 0.0700 ),
+				array( 'signal' => 'forest_cover_01', 'invert' => false, 'weight' => 0.0840 ),
+				array( 'signal' => 'protected_terrestrial__ptc', 'invert' => false, 'weight' => 0.0840 ),
+				array( 'signal' => 'renewable_energy__ptc', 'invert' => false, 'weight' => 0.0720 ),
+				array( 'signal' => 'wASH_access_index', 'invert' => false, 'weight' => 0.1080 ),
+				array( 'signal' => 'access_electricity__ptc', 'invert' => false, 'weight' => 0.0720 ),
 			),
 			'A'  => array(
-				array( 'signal' => 'urban_share', 'invert' => false, 'weight' => 0.25 ),
-				array( 'signal' => 'urban_cases_500k', 'invert' => false, 'weight' => 0.20 ),
-				array( 'signal' => 'big_city_ratio', 'invert' => true, 'weight' => 0.20 ),
-				array( 'signal' => 'sdg11', 'invert' => false, 'weight' => 0.15 ),
-				array( 'signal' => 'urban_land_per_urban_pop', 'invert' => false, 'weight' => 0.10 ),
-				array( 'signal' => 'avg_urban_dens_500k', 'invert' => true, 'weight' => 0.05 ),
-				array( 'signal' => 'built_share', 'invert' => false, 'weight' => 0.05 ),
+				array( 'signal' => 'transport_dens', 'invert' => false, 'weight' => 0.1575 ),
+				array( 'signal' => 'air_passengers__psn', 'invert' => false, 'weight' => 0.1050 ),
+				array( 'signal' => 'air_departures__cnt', 'invert' => false, 'weight' => 0.0875 ),
+				array( 'signal' => 'urban_share_01', 'invert' => false, 'weight' => 0.1050 ),
+				array( 'signal' => 'urban_pop_growth__ptc', 'invert' => false, 'weight' => 0.1050 ),
+				array( 'signal' => 'pop_in_1m_aggl__ptc', 'invert' => false, 'weight' => 0.0900 ),
+				array( 'signal' => 'big_city_ratio', 'invert' => false, 'weight' => 0.1000 ),
+				array( 'signal' => 'pop_density__psn_per_km_sq', 'invert' => true, 'weight' => 0.1000 ),
+				array( 'signal' => 'digital_access_index', 'invert' => false, 'weight' => 0.1500 ),
 			),
 			'S'  => array(
-				array( 'signal' => 'pop_dens', 'invert' => false, 'weight' => 0.25 ),
-				array( 'signal' => 'forest_share', 'invert' => false, 'weight' => 0.20 ),
-				array( 'signal' => 'big_city_dens', 'invert' => false, 'weight' => 0.20 ),
-				array( 'signal' => 'sdg_index', 'invert' => true, 'weight' => 0.15 ),
-				array( 'signal' => 'sdg16', 'invert' => false, 'weight' => 0.10 ),
-				array( 'signal' => 'built_share', 'invert' => true, 'weight' => 0.05 ),
-				array( 'signal' => 'rail_dens', 'invert' => false, 'weight' => 0.05 ),
+				array( 'signal' => 'pm25_exposure__mcg_per_m3', 'invert' => true, 'weight' => 0.1600 ),
+				array( 'signal' => 'co2_per_capita__tonnes_per_psn', 'invert' => true, 'weight' => 0.1600 ),
+				array( 'signal' => 'life_exp_total__years', 'invert' => false, 'weight' => 0.1190 ),
+				array( 'signal' => 'infect_and_stress_burden', 'invert' => true, 'weight' => 0.1190 ),
+				array( 'signal' => 'health_system_capacity', 'invert' => false, 'weight' => 0.1020 ),
+				array( 'signal' => 'forest_cover_01', 'invert' => false, 'weight' => 0.0880 ),
+				array( 'signal' => 'protected_terrestrial__ptc', 'invert' => false, 'weight' => 0.0770 ),
+				array( 'signal' => 'freshwater_renew_per_cap__m3', 'invert' => false, 'weight' => 0.0550 ),
+				array( 'signal' => 'debt_stress', 'invert' => true, 'weight' => 0.0720 ),
+				array( 'signal' => 'military_exp__ptc_gdp', 'invert' => true, 'weight' => 0.0480 ),
 			),
 			'Ct' => array(
-				array( 'signal' => 'avg_urban_dens_500k', 'invert' => true, 'weight' => 0.25 ),
-				array( 'signal' => 'urban_cases_500k', 'invert' => false, 'weight' => 0.20 ),
-				array( 'signal' => 'built_share', 'invert' => false, 'weight' => 0.15 ),
-				array( 'signal' => 'sdg11', 'invert' => false, 'weight' => 0.15 ),
-				array( 'signal' => 'pop_dens', 'invert' => true, 'weight' => 0.10 ),
-				array( 'signal' => 'transport_dens', 'invert' => false, 'weight' => 0.10 ),
-				array( 'signal' => 'big_city_ratio', 'invert' => true, 'weight' => 0.05 ),
+				array( 'signal' => 'women_parliament_seats__ptc', 'invert' => false, 'weight' => 0.1520 ),
+				array( 'signal' => 'fiscal_transparency_proxy', 'invert' => false, 'weight' => 0.1330 ),
+				array( 'signal' => 'tax_revenue__ptc_gdp', 'invert' => false, 'weight' => 0.0950 ),
+				array( 'signal' => 'rent_fuels', 'invert' => true, 'weight' => 0.1400 ),
+				array( 'signal' => 'clean_elec_share__ptc', 'invert' => false, 'weight' => 0.0840 ),
+				array( 'signal' => 'gdp_per_energy__ppp_per_kgoe', 'invert' => false, 'weight' => 0.0560 ),
+				array( 'signal' => 'net_oda_received__ptc_gni', 'invert' => false, 'weight' => 0.2000 ),
+				array( 'signal' => 'debt_stress', 'invert' => true, 'weight' => 0.0980 ),
+				array( 'signal' => 'urban_pop_growth__ptc', 'invert' => false, 'weight' => 0.0420 ),
 			),
 		);
 	}
@@ -440,23 +453,8 @@ class WSErgo_Country_Macro_Calculator {
 	 * @return list<string>
 	 */
 	private static function get_effective_cluster_features(): array {
-		if ( ! class_exists( 'WSErgo_Settings' ) ) {
-			return self::CLUSTER_FEATURES;
-		}
-		$custom = WSErgo_Settings::get_macro_cluster_features();
-		if ( count( $custom ) < 2 ) {
-			return self::CLUSTER_FEATURES;
-		}
-		$allow = array_flip( self::macro_signal_allowlist() );
-		$out   = array();
-		foreach ( $custom as $f ) {
-			$f = sanitize_key( (string) $f );
-			if ( $f !== '' && isset( $allow[ $f ] ) ) {
-				$out[] = $f;
-			}
-		}
-		$out = array_values( array_unique( $out ) );
-		return count( $out ) >= 2 ? $out : self::CLUSTER_FEATURES;
+		// Для актуальной методики используем фиксированный кластерный вектор из calculates.txt.
+		return self::CLUSTER_FEATURES;
 	}
 
 	/**
@@ -466,9 +464,7 @@ class WSErgo_Country_Macro_Calculator {
 	 */
 	private static function collect_normalization_columns(): array {
 		$cols = self::NORMALIZE_WITHIN_CLUSTER;
-		$axis_terms = class_exists( 'WSErgo_Settings' )
-			? WSErgo_Settings::get_macro_axis_terms_resolved()
-			: self::default_macro_axis_terms();
+		$axis_terms = self::default_macro_axis_terms();
 		foreach ( $axis_terms as $rows ) {
 			foreach ( $rows as $row ) {
 				$sig = sanitize_key( (string) ( $row['signal'] ?? '' ) );
@@ -537,6 +533,7 @@ class WSErgo_Country_Macro_Calculator {
 		if ( count( $rows ) < 1 ) {
 			return $empty;
 		}
+		self::apply_newdata_derived_metrics_to_rows( $rows );
 
 		$cluster_feats = self::get_effective_cluster_features();
 
@@ -613,9 +610,7 @@ class WSErgo_Country_Macro_Calculator {
 				return is_finite( $v ) ? $v : null;
 			};
 
-			$axis_terms = class_exists( 'WSErgo_Settings' )
-				? WSErgo_Settings::get_macro_axis_terms_resolved()
-				: self::default_macro_axis_terms();
+			$axis_terms = self::default_macro_axis_terms();
 
 			list( $f_vals, $f_w ) = self::macro_axis_vals_and_weights( $g, $axis_terms['F'] );
 			$F                   = self::compute_macro_axis_from_terms( $g, $axis_terms['F'] );
@@ -630,13 +625,13 @@ class WSErgo_Country_Macro_Calculator {
 			list( $ct_vals, $ct_w ) = self::macro_axis_vals_and_weights( $g, $axis_terms['Ct'] );
 			$Ct                    = self::compute_macro_axis_from_terms( $g, $axis_terms['Ct'] );
 
-			$ew = class_exists( 'WSErgo_Settings' ) ? WSErgo_Settings::get_macro_e_axis_weights() : array(
-				'F'  => 0.25,
+			$ew = array(
+				'F'  => 0.24,
 				'Cm' => 0.22,
-				'H'  => 0.09,
-				'A'  => 0.10,
-				'S'  => 0.20,
-				'Ct' => 0.13,
+				'H'  => 0.18,
+				'A'  => 0.14,
+				'S'  => 0.12,
+				'Ct' => 0.10,
 			);
 			$E = self::weighted_sum_finite(
 				array( $F, $Cm, $H, $A, $S, $Ct ),
@@ -680,6 +675,83 @@ class WSErgo_Country_Macro_Calculator {
 			'diag'     => $diag,
 			'raw_rows' => $rows,
 		);
+	}
+
+	/**
+	 * Производные столбцы D1..D19 для новой формулы (calculates.txt).
+	 *
+	 * @param array<string, array<string, float>> $rows
+	 */
+	private static function apply_newdata_derived_metrics_to_rows( array &$rows ): void {
+		foreach ( $rows as $iso3 => $row ) {
+			$pop = self::finite_or_nan( $row['pop_total__psn'] ?? NAN );
+			$land = self::finite_or_nan( $row['land_area__km_sq'] ?? NAN );
+
+			$urban_share = self::safe_div( $row['urban_pop_share__ptc'] ?? NAN, 100.0 );
+			$big_city_ratio = self::safe_div( $row['largest_city_pop__psn'] ?? NAN, $pop );
+			$road_dens = self::safe_div( self::finite_or_zero( $row['road_length__km'] ?? NAN ) * 1000.0, $land );
+			$rail_dens = self::safe_div( self::finite_or_zero( $row['railway_length__km'] ?? NAN ) * 1000.0, $land );
+			$forest_cover = self::safe_div( $row['forest_area__ptc'] ?? NAN, 100.0 );
+			$forest_area_km2 = is_finite( $land ) && is_finite( $forest_cover ) ? ( $land * $forest_cover ) : NAN;
+			$forest_per_cap_m2 = self::safe_div( $forest_area_km2 * 1000000.0, $pop );
+			$agri_pressure = self::safe_div( $row['agri_land__ptc'] ?? NAN, 100.0 );
+			$age_dep = self::safe_div( self::finite_or_zero( $row['pop_age0_14__ptc'] ?? NAN ) + self::finite_or_zero( $row['pop_age65_up__ptc'] ?? NAN ), 100.0 );
+			$clean_elec = self::finite_or_zero( $row['electricity_hydro__ptc'] ?? NAN ) + self::finite_or_zero( $row['electricity_nuclear__ptc'] ?? NAN );
+			$fossil_elec = self::finite_or_zero( $row['electricity_coal__ptc'] ?? NAN ) + self::finite_or_zero( $row['electricity_oil__ptc'] ?? NAN ) + self::finite_or_zero( $row['electricity_gas__ptc'] ?? NAN );
+			$secure = self::finite_or_nan( $row['secure_servers__per_1m_psn'] ?? NAN );
+			if ( is_finite( $secure ) ) {
+				$secure = min( $secure, 2000.0 );
+			}
+			$digital_access = (
+				self::finite_or_zero( $row['internet_users__ptc'] ?? NAN ) +
+				self::finite_or_zero( $row['broadband__per_100_psn'] ?? NAN ) +
+				self::finite_or_zero( $row['mobile_subs__per_100_psn'] ?? NAN ) +
+				self::finite_or_zero( $secure )
+			) / 4.0;
+			$health_capacity = self::finite_or_zero( $row['hosp_beds__per_1000_psn'] ?? NAN ) + self::finite_or_zero( $row['physicians__per_1000_psn'] ?? NAN );
+			$wash = (
+				self::finite_or_zero( $row['access_drinking_water_basic__ptc'] ?? NAN ) +
+				self::finite_or_zero( $row['access_sanitation_basic__ptc'] ?? NAN ) +
+				self::finite_or_zero( $row['access_clean_cooking__ptc'] ?? NAN ) +
+				self::finite_or_zero( $row['access_electricity__ptc'] ?? NAN )
+			) / 4.0;
+			$infect = self::finite_or_zero( $row['malaria_incidence__per_1000'] ?? NAN ) +
+				( self::finite_or_zero( $row['tuberculosis_incidence__per_100k'] ?? NAN ) / 100.0 ) +
+				( self::finite_or_zero( $row['hiv_prevalence__ptc'] ?? NAN ) * 10.0 ) +
+				( self::finite_or_zero( $row['suicide_rate__per_100k'] ?? NAN ) / 10.0 );
+			$substance = self::finite_or_zero( $row['alcohol_total__liters_per_cap'] ?? NAN ) + ( self::finite_or_zero( $row['tobacco_adult__ptc'] ?? NAN ) / 10.0 );
+			$fiscal = self::safe_div( $row['tax_revenue__ptc_gdp'] ?? NAN, max( self::finite_or_zero( $row['gov_expense__ptc_gdp'] ?? NAN ), 1e-6 ) );
+			$debt = self::safe_div( $row['external_debt__ptc_gni'] ?? NAN, 100.0 );
+			$rent_fuels = self::finite_or_zero( $row['coal_rents__ptc_gdp'] ?? NAN ) + self::finite_or_zero( $row['gas_rents__ptc_gdp'] ?? NAN );
+
+			$transport = NAN;
+			if ( is_finite( $road_dens ) || is_finite( $rail_dens ) ) {
+				$transport = self::finite_or_zero( $road_dens ) + self::finite_or_zero( $rail_dens );
+			}
+
+			$row['urban_share_01'] = $urban_share;
+			$row['big_city_ratio'] = $big_city_ratio;
+			$row['road_dens_km_per_km2'] = $road_dens;
+			$row['rail_dens_km_per_km2'] = $rail_dens;
+			$row['transport_dens'] = $transport;
+			$row['forest_cover_01'] = $forest_cover;
+			$row['forest_area_km2'] = $forest_area_km2;
+			$row['forest_per_capita_m2'] = $forest_per_cap_m2;
+			$row['agri_pressure'] = $agri_pressure;
+			$row['age_dependency_proxy'] = $age_dep;
+			$row['clean_elec_share__ptc'] = $clean_elec;
+			$row['fossil_elec_share__ptc'] = $fossil_elec;
+			$row['digital_access_index'] = $digital_access;
+			$row['health_system_capacity'] = $health_capacity;
+			$row['wASH_access_index'] = $wash;
+			$row['infect_and_stress_burden'] = $infect;
+			$row['substance_burden'] = $substance;
+			$row['fiscal_transparency_proxy'] = $fiscal;
+			$row['debt_stress'] = $debt;
+			$row['rent_fuels'] = $rent_fuels;
+
+			$rows[ $iso3 ] = $row;
+		}
 	}
 
 	/**
@@ -931,6 +1003,35 @@ class WSErgo_Country_Macro_Calculator {
 	}
 
 	/**
+	 * @param mixed $v
+	 */
+	private static function finite_or_nan( $v ): float {
+		$f = (float) $v;
+		return is_finite( $f ) ? $f : NAN;
+	}
+
+	/**
+	 * @param mixed $v
+	 */
+	private static function finite_or_zero( $v ): float {
+		$f = self::finite_or_nan( $v );
+		return is_finite( $f ) ? $f : 0.0;
+	}
+
+	/**
+	 * @param mixed $num
+	 * @param mixed $den
+	 */
+	private static function safe_div( $num, $den ): float {
+		$n = self::finite_or_nan( $num );
+		$d = self::finite_or_nan( $den );
+		if ( ! is_finite( $n ) || ! is_finite( $d ) || abs( $d ) < 1e-12 ) {
+			return NAN;
+		}
+		return $n / $d;
+	}
+
+	/**
 	 * @return array{
 	 *   standard: array<string, array<string, array<int, float>>>,
 	 *   sdg: array<string, array<int, array<string, float>>>,
@@ -1055,7 +1156,9 @@ class WSErgo_Country_Macro_Calculator {
 			return 'worldua';
 		}
 		$h = self::csv_header_normalized_keys( $body );
-		if ( isset( $h['country_code'], $h['year'] ) ) {
+		$has_country = isset( $h['country_code'] ) || isset( $h['coutry_code'] ) || isset( $h['countrycode'] ) || isset( $h['iso3'] ) || isset( $h['cca3'] );
+		$has_year = isset( $h['year'] ) || isset( $h['yr'] ) || isset( $h['timeperiod'] ) || isset( $h['time_period'] );
+		if ( $has_country && $has_year ) {
 			$has_long_value = isset( $h['value'] ) || isset( $h['obs_value'] ) || isset( $h['indicator_value'] ) || isset( $h['val'] );
 			$skip           = array( 'country_code' => true, 'year' => true, 'iso3' => true, 'iso' => true, 'cca3' => true, 'country' => true, 'country_name' => true );
 			$data_cols      = 0;
@@ -1122,7 +1225,7 @@ class WSErgo_Country_Macro_Calculator {
 			foreach ( $h as $i => $col ) {
 				$map[ $col ] = $row[ $i ] ?? '';
 			}
-			$cc = strtoupper( trim( (string) ( $map['country_code'] ?? $map['iso3'] ?? $map['cca3'] ?? '' ) ) );
+			$cc = strtoupper( trim( (string) ( $map['country_code'] ?? $map['coutry_code'] ?? $map['countrycode'] ?? $map['iso3'] ?? $map['cca3'] ?? '' ) ) );
 			$cc = self::resolve_country_token_to_iso3( $cc );
 			if ( strlen( $cc ) !== 3 ) {
 				continue;
@@ -1348,6 +1451,7 @@ class WSErgo_Country_Macro_Calculator {
 			'pop',
 			'tot_pop',
 			'pop_tot',
+			'pop_total__psn',
 		);
 		$area_cols = array(
 			'surface_area_sqkm',
@@ -1361,6 +1465,7 @@ class WSErgo_Country_Macro_Calculator {
 			'geographic_area',
 			'ag_land_sqkm',
 			'land_sq_km',
+			'land_area__km_sq',
 		);
 		foreach ( $parsed as $iso3 => $by_year ) {
 			foreach ( $by_year as $y => $cols ) {
@@ -1384,12 +1489,27 @@ class WSErgo_Country_Macro_Calculator {
 					self::wide_panel_seed_metric_if_absent( $standard, 'population_density_per_km2', $iso3, $y, (float) $cols['pop_dens'] );
 				} elseif ( isset( $cols['population_density_per_km2'] ) && is_finite( (float) $cols['population_density_per_km2'] ) ) {
 					self::wide_panel_seed_metric_if_absent( $standard, 'population_density_per_km2', $iso3, $y, (float) $cols['population_density_per_km2'] );
+				} elseif ( isset( $cols['pop_density__psn_per_km_sq'] ) && is_finite( (float) $cols['pop_density__psn_per_km_sq'] ) ) {
+					self::wide_panel_seed_metric_if_absent( $standard, 'population_density_per_km2', $iso3, $y, (float) $cols['pop_density__psn_per_km_sq'] );
 				}
 				if ( isset( $cols['urban_share'] ) && is_finite( (float) $cols['urban_share'] ) ) {
 					self::wide_panel_seed_metric_if_absent( $standard, 'urban_share_percent', $iso3, $y, (float) $cols['urban_share'] * 100.0 );
+				} elseif ( isset( $cols['urban_pop_share__ptc'] ) && is_finite( (float) $cols['urban_pop_share__ptc'] ) ) {
+					self::wide_panel_seed_metric_if_absent( $standard, 'urban_share_percent', $iso3, $y, (float) $cols['urban_pop_share__ptc'] );
 				}
 				if ( isset( $cols['forest_share'] ) && is_finite( (float) $cols['forest_share'] ) ) {
 					self::wide_panel_seed_metric_if_absent( $standard, 'forest_percentage', $iso3, $y, (float) $cols['forest_share'] * 100.0 );
+				} elseif ( isset( $cols['forest_area__ptc'] ) && is_finite( (float) $cols['forest_area__ptc'] ) ) {
+					self::wide_panel_seed_metric_if_absent( $standard, 'forest_percentage', $iso3, $y, (float) $cols['forest_area__ptc'] );
+				}
+				if ( isset( $cols['largest_city_pop__psn'] ) && is_finite( (float) $cols['largest_city_pop__psn'] ) ) {
+					self::wide_panel_seed_metric_if_absent( $standard, 'largest_city_population', $iso3, $y, (float) $cols['largest_city_pop__psn'] );
+				}
+				if ( isset( $cols['railway_length__km'] ) && is_finite( (float) $cols['railway_length__km'] ) ) {
+					self::wide_panel_seed_metric_if_absent( $standard, 'railway_length', $iso3, $y, (float) $cols['railway_length__km'] );
+				}
+				if ( isset( $cols['road_length__km'] ) && is_finite( (float) $cols['road_length__km'] ) ) {
+					self::wide_panel_seed_metric_if_absent( $standard, 'road_length', $iso3, $y, (float) $cols['road_length__km'] );
 				}
 			}
 		}
@@ -1401,7 +1521,6 @@ class WSErgo_Country_Macro_Calculator {
 	private static function normalize_csv_header_key( string $col ): string {
 		$col = trim( $col );
 		$c   = strtolower( str_replace( array( "\t", ' ', '-' ), '_', $col ) );
-		$c   = (string) preg_replace( '/_+/', '_', $c );
 		return (string) preg_replace( '/[^a-z0-9_]/', '', $c );
 	}
 
@@ -1494,7 +1613,7 @@ class WSErgo_Country_Macro_Calculator {
 			foreach ( $h as $i => $col ) {
 				$map[ $col ] = $row[ $i ] ?? '';
 			}
-			$cc = strtoupper( trim( (string) ( $map['country_code'] ?? $map['iso3'] ?? $map['iso'] ?? '' ) ) );
+			$cc = strtoupper( trim( (string) ( $map['country_code'] ?? $map['coutry_code'] ?? $map['countrycode'] ?? $map['iso3'] ?? $map['iso'] ?? '' ) ) );
 			$cc = self::resolve_country_token_to_iso3( $cc );
 			if ( strlen( $cc ) !== 3 ) {
 				continue;
@@ -1545,7 +1664,7 @@ class WSErgo_Country_Macro_Calculator {
 			foreach ( $h as $i => $col ) {
 				$map[ $col ] = $row[ $i ] ?? '';
 			}
-			$cc = strtoupper( trim( (string) ( $map['country_code'] ?? $map['cca3'] ?? $map['iso3'] ?? '' ) ) );
+			$cc = strtoupper( trim( (string) ( $map['country_code'] ?? $map['coutry_code'] ?? $map['countrycode'] ?? $map['cca3'] ?? $map['iso3'] ?? '' ) ) );
 			$cc = self::resolve_country_token_to_iso3( $cc );
 			if ( strlen( $cc ) !== 3 ) {
 				continue;
@@ -1760,6 +1879,16 @@ class WSErgo_Country_Macro_Calculator {
 			$raw_csv = array();
 			foreach ( self::STANDARD_METRIC_KEYS as $mk ) {
 				$raw_csv[ $mk ] = $g( $mk );
+			}
+			$wide_year_row = self::pick_wide_year_row( $wide[ $iso3 ] ?? array(), $target_year );
+			if ( null === $raw_csv['population_total'] && isset( $wide_year_row['pop_total__psn'] ) && is_finite( (float) $wide_year_row['pop_total__psn'] ) ) {
+				$raw_csv['population_total'] = (float) $wide_year_row['pop_total__psn'];
+			}
+			if ( null === $raw_csv['surface_area_sqkm'] && isset( $wide_year_row['land_area__km_sq'] ) && is_finite( (float) $wide_year_row['land_area__km_sq'] ) ) {
+				$raw_csv['surface_area_sqkm'] = (float) $wide_year_row['land_area__km_sq'];
+			}
+			if ( null === $raw_csv['population_density_per_km2'] && isset( $wide_year_row['pop_density__psn_per_km_sq'] ) && is_finite( (float) $wide_year_row['pop_density__psn_per_km_sq'] ) ) {
+				$raw_csv['population_density_per_km2'] = (float) $wide_year_row['pop_density__psn_per_km_sq'];
 			}
 
 			$pop  = $raw_csv['population_total'];

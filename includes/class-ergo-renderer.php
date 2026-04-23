@@ -555,73 +555,68 @@ class WSErgo_Renderer {
 						<div class="ergo-macro-panel" data-wsergo-macro-panel="F" style="display:block;">
 							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'Сырые признаки, из которых после нормализации внутри кластера собирается ось F (часть слагаемых в модели инвертируется, см. «Подробности расчёта»).', 'worldstat-ergonomics' ); ?></p>
 							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Плотность населения (арифм. среднее расчётной и отчётной)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['pop_dens'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля городского населения (0–1)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_share'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Ж/д, км/км² (условно ×1000 к длине)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['rail_dens'] ?? null, 4 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Средняя плотность городов ≥500 тыс. (WorldUA)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['avg_urban_dens_500k'] ?? null, 0 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Число городов ≥500 тыс. (агрегат)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_cases_500k'] ?? null, 1 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Дороги, км/км²', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['road_dens'] ?? null, 4 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'SDG9 — промышленность и инфраструктура', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['industry_innovation_infrastructure'] ?? null, 1 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Транспортная плотность', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['transport_dens'] ?? null, 4 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Авиавылеты (число)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['air_departures__cnt'] ?? null, 0 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Авиапассажиры', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['air_passengers__psn'] ?? null, 0 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Интернет-пользователи, %', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['internet_users__ptc'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'ШПД на 100 чел.', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['broadband__per_100_psn'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Мобильные подписки на 100 чел.', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['mobile_subs__per_100_psn'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Безопасные серверы на 1 млн', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['secure_servers__per_1m_psn'] ?? null, 2 ) ); ?></span></li>
 							</ul>
 						</div>
 						<div class="ergo-macro-panel" data-wsergo-macro-panel="Cm" style="display:none;">
 							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'Сырые признаки для оси Cm (часть слагаемых в модели инвертируется).', 'worldstat-ergonomics' ); ?></p>
 							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Лес, доля территории (0–1)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['forest_share'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля застройки на территории страны', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['built_share'] ?? null, 4 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Плотность крупнейшего города (WorldUA)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['big_city_dens'] ?? null, 0 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Лесная площадь на душу населения, м²/чел.', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['forest_area_per_capita'] ?? null, 1 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Плотность населения (арифм. среднее)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['pop_dens'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'SDG11 — устойчивые города', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['sustainable_cities'] ?? null, 1 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'PM2.5 (мкг/м³)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['pm25_exposure__mcg_per_m3'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'CO2 на душу (тонн)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['co2_per_capita__tonnes_per_psn'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля ВИЭ, %', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['renewable_energy__ptc'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Лесной покров (0-1)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['forest_cover_01'] ?? null, 3 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Лес на душу (м²)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['forest_per_capita_m2'] ?? null, 1 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Индекс доступа к базовым услугам (WASH+энергия)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['wASH_access_index'] ?? null, 2 ) ); ?></span></li>
 							</ul>
 						</div>
 						<div class="ergo-macro-panel" data-wsergo-macro-panel="H" style="display:none;">
 							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'Сырые признаки для оси H.', 'worldstat-ergonomics' ); ?></p>
 							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля городского населения (0–1)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_share'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Лес, доля территории (0–1)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['forest_share'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Плотность населения (арифм. среднее)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['pop_dens'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля населения в городах ≥500 тыс.', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['pct_urban_500k'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'SDG11 — устойчивые города', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['sustainable_cities'] ?? null, 1 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля населения в крупнейшем городе', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['big_city_ratio'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Суммарная транспортная плотность', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['transport_dens'] ?? null, 4 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Городская земля на горожанина, м²/чел.', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_land_per_urban_pop'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Ожидаемая продолжительность жизни', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['life_exp_total__years'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Демографическая нагрузка (0-1)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['age_dependency_proxy'] ?? null, 3 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Рождаемость (на женщину)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['fertility_rate__births_per_woman'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Миграция (чел.)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['net_migration__psn'] ?? null, 0 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля городского населения (0-1)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_share_01'] ?? null, 3 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля населения в агломерациях >1M, %', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['pop_in_1m_aggl__ptc'] ?? null, 2 ) ); ?></span></li>
 							</ul>
 						</div>
 						<div class="ergo-macro-panel" data-wsergo-macro-panel="A" style="display:none;">
 							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'Сырые признаки для оси A.', 'worldstat-ergonomics' ); ?></p>
 							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля городского населения (0–1)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_share'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Число городов ≥500 тыс. (агрегат)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_cases_500k'] ?? null, 1 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля населения в крупнейшем городе', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['big_city_ratio'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'SDG11 — устойчивые города', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['sustainable_cities'] ?? null, 1 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Городская земля на горожанина, м²/чел.', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_land_per_urban_pop'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Средняя плотность городов ≥500 тыс. (WorldUA)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['avg_urban_dens_500k'] ?? null, 0 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля застройки на территории страны', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['built_share'] ?? null, 4 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Транспортная плотность', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['transport_dens'] ?? null, 4 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Авиапассажиры', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['air_passengers__psn'] ?? null, 0 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Авиавылеты (число)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['air_departures__cnt'] ?? null, 0 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля городского населения (0-1)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_share_01'] ?? null, 3 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Рост городского населения, %', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_pop_growth__ptc'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Цифровой индекс доступа', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['digital_access_index'] ?? null, 2 ) ); ?></span></li>
 							</ul>
 						</div>
 						<div class="ergo-macro-panel" data-wsergo-macro-panel="S" style="display:none;">
 							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'Сырые признаки для оси S.', 'worldstat-ergonomics' ); ?></p>
 							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Плотность населения (арифм. среднее)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['pop_dens'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Лес, доля территории (0–1)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['forest_share'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Плотность крупнейшего города (WorldUA)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['big_city_dens'] ?? null, 0 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Индекс SDG (агрегат файла)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['sdg_index_score'] ?? null, 1 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'SDG16 — мир и правосудие', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['peace_justice'] ?? null, 1 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля застройки на территории страны', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['built_share'] ?? null, 4 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Ж/д, км/км² (условно ×1000 к длине)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['rail_dens'] ?? null, 4 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'PM2.5 (мкг/м³)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['pm25_exposure__mcg_per_m3'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'CO2 на душу (тонн)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['co2_per_capita__tonnes_per_psn'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Ожидаемая продолжительность жизни', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['life_exp_total__years'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Нагрузка болезней/стресса', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['infect_and_stress_burden'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Мощность системы здравоохранения', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['health_system_capacity'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Долговой стресс (0-1)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['debt_stress'] ?? null, 3 ) ); ?></span></li>
 							</ul>
 						</div>
 						<div class="ergo-macro-panel" data-wsergo-macro-panel="Ct" style="display:none;">
 							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'Сырые признаки для оси Ct.', 'worldstat-ergonomics' ); ?></p>
 							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Средняя плотность городов ≥500 тыс. (WorldUA)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['avg_urban_dens_500k'] ?? null, 0 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Число городов ≥500 тыс. (агрегат)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_cases_500k'] ?? null, 1 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля застройки на территории страны', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['built_share'] ?? null, 4 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'SDG11 — устойчивые города', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['sustainable_cities'] ?? null, 1 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Плотность населения (арифм. среднее)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['pop_dens'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Суммарная транспортная плотность', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['transport_dens'] ?? null, 4 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля населения в крупнейшем городе', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['big_city_ratio'] ?? null, 3 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Женщины в парламенте, %', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['women_parliament_seats__ptc'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Фискальная прозрачность (proxy)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['fiscal_transparency_proxy'] ?? null, 3 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Налоговые доходы (% ВВП)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['tax_revenue__ptc_gdp'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Рента ископаемого топлива', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['rent_fuels'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Чистая электроэнергия, %', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['clean_elec_share__ptc'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'ODA, % ВНД', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['net_oda_received__ptc_gni'] ?? null, 2 ) ); ?></span></li>
 							</ul>
 						</div>
 					</div>
@@ -641,42 +636,43 @@ class WSErgo_Renderer {
 						<div class="ergo-macro-panel" data-wsergo-macro-panel="roads" style="display:block;">
 							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'Плотность транспортной сети (сырые признаки после агрегации по территории).', 'worldstat-ergonomics' ); ?></p>
 							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Ж/д, км/км² (условно ×1000 к длине)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['rail_dens'] ?? null, 4 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Дороги, км/км²', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['road_dens'] ?? null, 4 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Ж/д плотность', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['rail_dens_km_per_km2'] ?? null, 4 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Дорожная плотность', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['road_dens_km_per_km2'] ?? null, 4 ) ); ?></span></li>
 								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Суммарная транспортная плотность', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['transport_dens'] ?? null, 4 ) ); ?></span></li>
 							</ul>
 						</div>
 						<div class="ergo-macro-panel" data-wsergo-macro-panel="urban" style="display:none;">
 							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля городского населения (0–1)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_share'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля застройки на территории страны', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['built_share'] ?? null, 4 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля населения в крупнейшем городе', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['big_city_ratio'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Городская земля на горожанина, м²/чел.', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_land_per_urban_pop'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Крупные агломерации (WorldUA / Cities): плотность крупнейшего города', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['big_city_dens'] ?? null, 0 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Доля городского населения (0-1)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_share_01'] ?? null, 3 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Население крупнейшего города / население страны', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['big_city_ratio'] ?? null, 3 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Население в агломерациях >1M, %', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['pop_in_1m_aggl__ptc'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Рост городского населения, %', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_pop_growth__ptc'] ?? null, 2 ) ); ?></span></li>
 							</ul>
 						</div>
 						<div class="ergo-macro-panel" data-wsergo-macro-panel="green" style="display:none;">
 							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Лес, доля территории (0–1)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['forest_share'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Лесная площадь на душу населения, м²/чел.', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['forest_area_per_capita'] ?? null, 1 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Лесной покров (0-1)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['forest_cover_01'] ?? null, 3 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Лесная площадь на душу населения, м²/чел.', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['forest_per_capita_m2'] ?? null, 1 ) ); ?></span></li>
 							</ul>
 						</div>
 						<div class="ergo-macro-panel" data-wsergo-macro-panel="biodiversity" style="display:none;">
-							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'В текущей макромодели отдельного ряда «биоразнообразие» нет; ближайшие прокси — лес и SDG (если загружены).', 'worldstat-ergonomics' ); ?></p>
+							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'Прокси устойчивости природной среды в новой модели.', 'worldstat-ergonomics' ); ?></p>
 							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label">SDG11 (sustainable_cities)</span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['sustainable_cities'] ?? null, 1 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Охраняемые территории, %', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['protected_terrestrial__ptc'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Агронагрузка (0-1)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['agri_pressure'] ?? null, 3 ) ); ?></span></li>
 							</ul>
 						</div>
 						<div class="ergo-macro-panel" data-wsergo-macro-panel="industry" style="display:none;">
 							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label">SDG9 (industry / infrastructure)</span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['industry_innovation_infrastructure'] ?? null, 1 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label">SDG16 (peace / justice)</span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['peace_justice'] ?? null, 1 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Энергопотребление на душу', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['energy_use_per_cap__kgoe'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'ВВП на единицу энергии', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['gdp_per_energy__ppp_per_kgoe'] ?? null, 2 ) ); ?></span></li>
 							</ul>
 						</div>
 						<div class="ergo-macro-panel" data-wsergo-macro-panel="tech" style="display:none;">
 							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Индекс SDG (агрегат файла)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['sdg_index_score'] ?? null, 1 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Плотность населения (арифм. среднее расчётной и отчётной)', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['pop_dens'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Интернет-пользователи, %', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['internet_users__ptc'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'ШПД на 100 чел.', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['broadband__per_100_psn'] ?? null, 2 ) ); ?></span></li>
+								<li><span class="wsergo-macro-kv__label"><?php esc_html_e( 'Цифровой индекс доступа', 'worldstat-ergonomics' ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['digital_access_index'] ?? null, 2 ) ); ?></span></li>
 							</ul>
 						</div>
 					</div>
@@ -746,25 +742,25 @@ class WSErgo_Renderer {
 			</summary>
 			<div style="padding:0 16px 16px;font-size:.92rem;line-height:1.55;color:var(--wsp-gray-800,#1f2937);border-top:1px solid var(--wsp-gray-200,#e5e7eb);">
 				<p style="margin:14px 0 10px;">
-					<?php esc_html_e( 'Индекс на вкладке «Эргономичность» в режиме макроданных строится только из CSV, загруженных в платформу (стандартные ряды, SDG, WorldUA). Для каждой страны с полным треугольником «население — площадь — плотность» формируется вектор признаков; затем выполняется геометрическая нормализация и кластеризация.', 'worldstat-ergonomics' ); ?>
+					<?php esc_html_e( 'Индекс на вкладке «Эргономичность» в режиме макроданных строится только из шести новых CSV, загруженных в платформу (demographics, urban_infra, environment, health_comfort, governance_sdg, energy). Сначала объединяются ряды по country_code + year, затем считаются производные показатели, выполняются нормализация и кластеризация.', 'worldstat-ergonomics' ); ?>
 				</p>
 				<ol style="margin:0 0 12px;padding-left:1.25rem;">
 					<li><?php esc_html_e( 'Стандартизация признаков по столбцам: вычитание среднего, деление на σ (при σ≈0 подставляется 1). Число стран в выборке — из текущих загруженных CSV.', 'worldstat-ergonomics' ); ?></li>
-					<li><?php echo esc_html( sprintf( /* translators: %d: number of clusters */ __( 'Кластеризация k-means по вектору из %d признаков (число кластеров k задаётся в настройках эргономики).', 'worldstat-ergonomics' ), $k ) ); ?></li>
+					<li><?php echo esc_html( sprintf( /* translators: %d: number of clusters */ __( 'Кластеризация k-means по вектору из %d признаков (pop_density, urban_share_01, transport_dens, forest_cover_01, renewable_energy, life_exp, pm25, gdp_per_energy).', 'worldstat-ergonomics' ), $k ) ); ?></li>
 					<li><?php esc_html_e( 'Для показателей из списка нормализации внутри кластера: min–max по странам кластера в сырых значениях → величина в диапазоне 0…1 (при равенстве min и max подставляется 0,5).', 'worldstat-ergonomics' ); ?></li>
 					<li><?php esc_html_e( 'Пропуски (нечисловые или бесконечные слагаемые) перед кластеризацией заполняются медианой признака по всей выборке; при расчёте каждой оси F, Cm, H, A, S, Ct взвешенное среднее пересчитывается только по конечным слагаемым (веса нормируются заново).', 'worldstat-ergonomics' ); ?></li>
 				</ol>
 				<p style="margin:0 0 8px;"><strong><?php esc_html_e( 'Шесть осей (0…1), затем умножение на 100 для отображения', 'worldstat-ergonomics' ); ?></strong></p>
 				<ul style="margin:0 0 12px;padding-left:1.2rem;font-family:system-ui,sans-serif;">
-					<li><strong>F</strong> — <?php esc_html_e( 'взвешенная комбинация: (1−pop_dens), urban_share, rail_dens, avg_urban_dens_500k, urban_cases_500k, road_dens, SDG9; веса 0,20 / 0,15 / 0,20 / 0,15 / 0,13 / 0,12 / 0,05.', 'worldstat-ergonomics' ); ?></li>
-					<li><strong>Cm</strong> — <?php esc_html_e( 'forest_share, (1−built_share), (1−big_city_dens), forest_area_per_capita, (1−pop_dens), SDG11; веса 0,30 / 0,25 / 0,20 / 0,10 / 0,10 / 0,05.', 'worldstat-ergonomics' ); ?></li>
-					<li><strong>H</strong> — <?php esc_html_e( 'urban_share, forest_share, (1−pop_dens), pct_urban_500k, SDG11, (1−big_city_ratio), transport_dens, urban_land_per_urban_pop; веса 0,20 / 0,20 / 0,15 / 0,15 / 0,10 / 0,10 / 0,05 / 0,05.', 'worldstat-ergonomics' ); ?></li>
-					<li><strong>A</strong> — <?php esc_html_e( 'urban_share, urban_cases_500k, (1−big_city_ratio), SDG11, urban_land_per_urban_pop, (1−avg_urban_dens_500k), built_share; веса 0,25 / 0,20 / 0,20 / 0,15 / 0,10 / 0,05 / 0,05.', 'worldstat-ergonomics' ); ?></li>
-					<li><strong>S</strong> — <?php esc_html_e( 'pop_dens, forest_share, big_city_dens, (1−sdg_index), sdg16, (1−built_share), rail_dens; веса 0,25 / 0,20 / 0,20 / 0,15 / 0,10 / 0,05 / 0,05.', 'worldstat-ergonomics' ); ?></li>
-					<li><strong>Ct</strong> — <?php esc_html_e( '(1−avg_urban_dens_500k), urban_cases_500k, built_share, SDG11, (1−pop_dens), transport_dens, (1−big_city_ratio); веса 0,25 / 0,20 / 0,15 / 0,15 / 0,10 / 0,10 / 0,05.', 'worldstat-ergonomics' ); ?></li>
+					<li><strong>F</strong> — <?php esc_html_e( 'транспорт, авиа, цифровая доступность, энергоэффективность и структура энергобаланса.', 'worldstat-ergonomics' ); ?></li>
+					<li><strong>Cm</strong> — <?php esc_html_e( 'экология, ресурсы, здоровье и бытовый комфорт.', 'worldstat-ergonomics' ); ?></li>
+					<li><strong>H</strong> — <?php esc_html_e( 'демография, миграция, урбанизация и базовая инфраструктура жизни.', 'worldstat-ergonomics' ); ?></li>
+					<li><strong>A</strong> — <?php esc_html_e( 'доступность среды: транспорт, рост урбанизации, агломерации, цифровой доступ.', 'worldstat-ergonomics' ); ?></li>
+					<li><strong>S</strong> — <?php esc_html_e( 'безопасность среды и устойчивость: экология, здоровье, долговая и военная нагрузка.', 'worldstat-ergonomics' ); ?></li>
+					<li><strong>Ct</strong> — <?php esc_html_e( 'управляемость: представительство, фискальные прокси, энергетическая и долговая структура.', 'worldstat-ergonomics' ); ?></li>
 				</ul>
 				<p style="margin:0 0 10px;font-family:ui-monospace,'Cascadia Code',monospace;font-size:.88rem;background:#fff;padding:10px 12px;border-radius:8px;border:1px solid #e5e7eb;">
-					<strong>E</strong> = 0,25·F + 0,22·Cm + 0,09·H + 0,10·A + 0,20·S + 0,13·Ct<br />
+					<strong>E</strong> = 0,24·F + 0,22·Cm + 0,18·H + 0,14·A + 0,12·S + 0,10·Ct<br />
 					<?php esc_html_e( 'Сводный E на карточке — E×100 (шкала 0…100). Если после шагов E не конечен или ≤0, индекс не показывается.', 'worldstat-ergonomics' ); ?>
 				</p>
 				<p class="wsp-muted" style="margin:0;font-size:.85rem;">
