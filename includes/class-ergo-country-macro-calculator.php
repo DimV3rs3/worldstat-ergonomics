@@ -13,10 +13,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 class WSErgo_Country_Macro_Calculator {
 
 	/** Новый ключ — старый кэш без diag/raw_rows больше не читается (избегает фаталов при несовпадении формата). */
-	private const TRANSIENT_KEY = 'wsergo_macro_scores_bundle_v8';
+	private const TRANSIENT_KEY = 'wsergo_macro_scores_bundle_v11';
 
 	/** Инкремент при изменении логики расчёта — сбрасывает устаревший transient без смены CSV. */
-	private const SCORE_BUNDLE_LOGIC = 8;
+	private const SCORE_BUNDLE_LOGIC = 15;
 
 	/** @var array<string, string>|null ISO2 => ISO3 из data/countries.json платформы */
 	private static $iso2_to_iso3_file_cache = null;
@@ -62,6 +62,39 @@ class WSErgo_Country_Macro_Calculator {
 		'sdg_index_score',
 		'industry_innovation_infrastructure',
 		'peace_justice',
+		// Доп. признаки из широких CSV (country_code, year, несколько столбцов).
+		'urban_growth_pct',
+		'elec_access',
+		'broadband_per100',
+		'internet_pct',
+		'mobile_per100',
+		'lpi_score',
+		'lpi_infra',
+		'air_passengers',
+		'container_teu',
+		'protected_pct',
+		'pm25_ug_m3',
+		'ghg_per_capita',
+		'renew_energy_pct',
+		'clean_cooking_pct',
+		'water_prod_usd_m3',
+		'arable_pct',
+		'life_exp_years',
+		'mort_u5_per1000',
+		'mort_infant_per1000',
+		'mort_neo_per1000',
+		'sanitation_safe_pct',
+		'water_safe_pct',
+		'uhc_index',
+		'cpi_business',
+		'cpi_corruption',
+		'homicide_per100k',
+		'rnd_gdp_pct',
+		'hi_tech_exp_pct',
+		'energy_use_kg_oil_cap',
+		'energy_int_mj_gdp_ppp',
+		'gdp_per_energy_ppp',
+		'renew_elec_pct',
 	];
 
 	/** Ключи стандартных рядов (country_code, year, value). */
@@ -83,6 +116,135 @@ class WSErgo_Country_Macro_Calculator {
 	}
 
 	/**
+	 * Ключи базовых рядов (country_code + year + value), которые можно явно привязать к строке CSV в БД.
+	 *
+	 * @return list<string>
+	 */
+	public static function bindable_standard_metric_keys(): array {
+		return self::STANDARD_METRIC_KEYS;
+	}
+
+	/**
+	 * Встроенные формулы макро-осей (нормализованные признаки 0–1, веса не обязаны суммироваться в 1 — перенормируются при расчёте).
+	 *
+	 * @return array<string, list<array{signal:string, invert:bool, weight:float}>>
+	 */
+	public static function default_macro_axis_terms(): array {
+		return array(
+			'F'  => array(
+				array( 'signal' => 'pop_dens', 'invert' => true, 'weight' => 0.20 ),
+				array( 'signal' => 'urban_share', 'invert' => false, 'weight' => 0.15 ),
+				array( 'signal' => 'rail_dens', 'invert' => false, 'weight' => 0.20 ),
+				array( 'signal' => 'avg_urban_dens_500k', 'invert' => false, 'weight' => 0.15 ),
+				array( 'signal' => 'urban_cases_500k', 'invert' => false, 'weight' => 0.13 ),
+				array( 'signal' => 'road_dens', 'invert' => false, 'weight' => 0.12 ),
+				array( 'signal' => 'sdg9', 'invert' => false, 'weight' => 0.05 ),
+			),
+			'Cm' => array(
+				array( 'signal' => 'forest_share', 'invert' => false, 'weight' => 0.30 ),
+				array( 'signal' => 'built_share', 'invert' => true, 'weight' => 0.25 ),
+				array( 'signal' => 'big_city_dens', 'invert' => true, 'weight' => 0.20 ),
+				array( 'signal' => 'forest_area_per_capita', 'invert' => false, 'weight' => 0.10 ),
+				array( 'signal' => 'pop_dens', 'invert' => true, 'weight' => 0.10 ),
+				array( 'signal' => 'sdg11', 'invert' => false, 'weight' => 0.05 ),
+			),
+			'H'  => array(
+				array( 'signal' => 'urban_share', 'invert' => false, 'weight' => 0.20 ),
+				array( 'signal' => 'forest_share', 'invert' => false, 'weight' => 0.20 ),
+				array( 'signal' => 'pop_dens', 'invert' => true, 'weight' => 0.15 ),
+				array( 'signal' => 'pct_urban_500k', 'invert' => false, 'weight' => 0.15 ),
+				array( 'signal' => 'sdg11', 'invert' => false, 'weight' => 0.10 ),
+				array( 'signal' => 'big_city_ratio', 'invert' => true, 'weight' => 0.10 ),
+				array( 'signal' => 'transport_dens', 'invert' => false, 'weight' => 0.05 ),
+				array( 'signal' => 'urban_land_per_urban_pop', 'invert' => false, 'weight' => 0.05 ),
+			),
+			'A'  => array(
+				array( 'signal' => 'urban_share', 'invert' => false, 'weight' => 0.25 ),
+				array( 'signal' => 'urban_cases_500k', 'invert' => false, 'weight' => 0.20 ),
+				array( 'signal' => 'big_city_ratio', 'invert' => true, 'weight' => 0.20 ),
+				array( 'signal' => 'sdg11', 'invert' => false, 'weight' => 0.15 ),
+				array( 'signal' => 'urban_land_per_urban_pop', 'invert' => false, 'weight' => 0.10 ),
+				array( 'signal' => 'avg_urban_dens_500k', 'invert' => true, 'weight' => 0.05 ),
+				array( 'signal' => 'built_share', 'invert' => false, 'weight' => 0.05 ),
+			),
+			'S'  => array(
+				array( 'signal' => 'pop_dens', 'invert' => false, 'weight' => 0.25 ),
+				array( 'signal' => 'forest_share', 'invert' => false, 'weight' => 0.20 ),
+				array( 'signal' => 'big_city_dens', 'invert' => false, 'weight' => 0.20 ),
+				array( 'signal' => 'sdg_index', 'invert' => true, 'weight' => 0.15 ),
+				array( 'signal' => 'sdg16', 'invert' => false, 'weight' => 0.10 ),
+				array( 'signal' => 'built_share', 'invert' => true, 'weight' => 0.05 ),
+				array( 'signal' => 'rail_dens', 'invert' => false, 'weight' => 0.05 ),
+			),
+			'Ct' => array(
+				array( 'signal' => 'avg_urban_dens_500k', 'invert' => true, 'weight' => 0.25 ),
+				array( 'signal' => 'urban_cases_500k', 'invert' => false, 'weight' => 0.20 ),
+				array( 'signal' => 'built_share', 'invert' => false, 'weight' => 0.15 ),
+				array( 'signal' => 'sdg11', 'invert' => false, 'weight' => 0.15 ),
+				array( 'signal' => 'pop_dens', 'invert' => true, 'weight' => 0.10 ),
+				array( 'signal' => 'transport_dens', 'invert' => false, 'weight' => 0.10 ),
+				array( 'signal' => 'big_city_ratio', 'invert' => true, 'weight' => 0.05 ),
+			),
+		);
+	}
+
+	/**
+	 * Встроенные ключи сигналов (k-means, нормализация, формулы по умолчанию), без пользовательских дополнений.
+	 *
+	 * @return list<string>
+	 */
+	public static function macro_signal_builtin_slist(): array {
+		$aliases = array( 'sdg11', 'sdg9', 'sdg16', 'sdg_index' );
+		$merged  = array_merge( self::CLUSTER_FEATURES, self::NORMALIZE_WITHIN_CLUSTER, $aliases );
+		$merged  = array_values( array_unique( $merged ) );
+		sort( $merged );
+		return $merged;
+	}
+
+	/**
+	 * Сигналы, допустимые в формулах макро-осей и в списке признаков кластеризации (встроенные + из настроек «Доп. ключи»).
+	 *
+	 * Новые столбцы wide: имя после нормализации заголовка = ключ в строке признаков; чтобы ключ появился здесь, задайте его в
+	 * {@see WSErgo_Settings::OPTION_MACRO_EXTRA_SIGNALS_TEXT} или добавьте сопоставление в {@see self::wide_csv_column_to_signal()}.
+	 *
+	 * @return list<string>
+	 */
+	public static function macro_signal_allowlist(): array {
+		$merged = self::macro_signal_builtin_slist();
+		if ( class_exists( 'WSErgo_Settings' ) ) {
+			$merged = array_merge( $merged, WSErgo_Settings::get_macro_extra_signals_effective() );
+		}
+		$merged = array_values( array_unique( $merged ) );
+		sort( $merged );
+		return $merged;
+	}
+
+	/**
+	 * Подписи для UI (ось макро → человекочитаемое имя).
+	 *
+	 * @return array<string, string>
+	 */
+	public static function macro_axis_labels_ru(): array {
+		return array(
+			'F'  => __( 'Функциональность (F)', 'worldstat-ergonomics' ),
+			'Cm' => __( 'Комфорт (Cm)', 'worldstat-ergonomics' ),
+			'H'  => __( 'Здоровье / среда (H)', 'worldstat-ergonomics' ),
+			'A'  => __( 'Доступность (A)', 'worldstat-ergonomics' ),
+			'S'  => __( 'Безопасность / устойчивость (S)', 'worldstat-ergonomics' ),
+			'Ct' => __( 'Управляемость (Ct)', 'worldstat-ergonomics' ),
+		);
+	}
+
+	/**
+	 * Встроенный набор признаков для k-means (если в настройках не задано ≥2 своих).
+	 *
+	 * @return list<string>
+	 */
+	public static function default_cluster_features(): array {
+		return self::CLUSTER_FEATURES;
+	}
+
+	/**
 	 * @return array<string, array{E:float, F:float, Cm:float, H:float, A:float, S:float, Ct:float}>
 	 */
 	public static function get_all_scores(): array {
@@ -100,6 +262,7 @@ class WSErgo_Country_Macro_Calculator {
 			'y'         => 0,
 			'r'         => 0,
 			'lv'        => self::SCORE_BUNDLE_LOGIC,
+			'ch'        => '',
 			'scores'    => array(),
 			'diag'      => array(),
 			'raw_rows'  => array(),
@@ -109,6 +272,7 @@ class WSErgo_Country_Macro_Calculator {
 		}
 		$year = WSErgo_Settings::get_macro_reference_year();
 		$rev  = (int) get_option( 'wsp_csv_files_revision', 0 );
+		$ch   = class_exists( 'WSErgo_Settings' ) ? WSErgo_Settings::macro_config_hash() : '';
 		$bund = get_transient( self::TRANSIENT_KEY );
 		if (
 			is_array( $bund )
@@ -116,6 +280,7 @@ class WSErgo_Country_Macro_Calculator {
 			&& (int) $bund['y'] === $year
 			&& (int) $bund['r'] === $rev
 			&& (int) $bund['lv'] === self::SCORE_BUNDLE_LOGIC
+			&& (string) ( $bund['ch'] ?? '' ) === $ch
 			&& is_array( $bund['scores'] )
 			&& is_array( $bund['diag'] )
 			&& is_array( $bund['raw_rows'] )
@@ -124,6 +289,7 @@ class WSErgo_Country_Macro_Calculator {
 				'y'        => (int) $bund['y'],
 				'r'        => (int) $bund['r'],
 				'lv'       => (int) $bund['lv'],
+				'ch'       => (string) ( $bund['ch'] ?? '' ),
 				'scores'   => $bund['scores'],
 				'diag'     => $bund['diag'],
 				'raw_rows' => $bund['raw_rows'],
@@ -136,6 +302,7 @@ class WSErgo_Country_Macro_Calculator {
 		$full['y']        = $year;
 		$full['r']        = $rev;
 		$full['lv']       = self::SCORE_BUNDLE_LOGIC;
+		$full['ch']       = class_exists( 'WSErgo_Settings' ) ? WSErgo_Settings::macro_config_hash() : '';
 		$full['scores']   = isset( $full['scores'] ) && is_array( $full['scores'] ) ? $full['scores'] : array();
 		$full['diag']     = isset( $full['diag'] ) && is_array( $full['diag'] ) ? $full['diag'] : array();
 		$full['raw_rows'] = isset( $full['raw_rows'] ) && is_array( $full['raw_rows'] ) ? $full['raw_rows'] : array();
@@ -182,15 +349,15 @@ class WSErgo_Country_Macro_Calculator {
 	 */
 	public static function standard_metric_labels_ru(): array {
 		return array(
-			'population_total'               => __( 'Население (population_total)', 'worldstat-ergonomics' ),
-			'surface_area_sqkm'              => __( 'Площадь, км² (surface_area_sqkm)', 'worldstat-ergonomics' ),
-			'population_density_per_km2'     => __( 'Плотность населения (population_density_per_km2)', 'worldstat-ergonomics' ),
-			'urban_share_percent'            => __( 'Доля городского населения, % (urban_share_percent)', 'worldstat-ergonomics' ),
-			'urban_land_area_sqkm'           => __( 'Площадь городской застройки, км² (urban_land_area_sqkm)', 'worldstat-ergonomics' ),
-			'forest_percentage'              => __( 'Лесной покров, % (forest_percentage)', 'worldstat-ergonomics' ),
-			'largest_city_population'        => __( 'Население крупнейшего города (largest_city_population)', 'worldstat-ergonomics' ),
-			'railway_length'                 => __( 'Железные дороги, км (railway_length)', 'worldstat-ergonomics' ),
-			'road_length'                    => __( 'Дороги, км (road_length)', 'worldstat-ergonomics' ),
+			'population_total'           => __( 'Население, чел.', 'worldstat-ergonomics' ),
+			'surface_area_sqkm'        => __( 'Площадь территории, км²', 'worldstat-ergonomics' ),
+			'population_density_per_km2' => __( 'Плотность населения на км²', 'worldstat-ergonomics' ),
+			'urban_share_percent'      => __( 'Доля городского населения, %', 'worldstat-ergonomics' ),
+			'urban_land_area_sqkm'     => __( 'Площадь городской застройки, км²', 'worldstat-ergonomics' ),
+			'forest_percentage'        => __( 'Лесной покров, %', 'worldstat-ergonomics' ),
+			'largest_city_population'  => __( 'Население крупнейшего города', 'worldstat-ergonomics' ),
+			'railway_length'           => __( 'Железные дороги, км', 'worldstat-ergonomics' ),
+			'road_length'              => __( 'Дороги, км', 'worldstat-ergonomics' ),
 		);
 	}
 
@@ -268,6 +435,86 @@ class WSErgo_Country_Macro_Calculator {
 	}
 
 	/**
+	 * Признаки k-means: из настроек или встроенный список.
+	 *
+	 * @return list<string>
+	 */
+	private static function get_effective_cluster_features(): array {
+		if ( ! class_exists( 'WSErgo_Settings' ) ) {
+			return self::CLUSTER_FEATURES;
+		}
+		$custom = WSErgo_Settings::get_macro_cluster_features();
+		if ( count( $custom ) < 2 ) {
+			return self::CLUSTER_FEATURES;
+		}
+		$allow = array_flip( self::macro_signal_allowlist() );
+		$out   = array();
+		foreach ( $custom as $f ) {
+			$f = sanitize_key( (string) $f );
+			if ( $f !== '' && isset( $allow[ $f ] ) ) {
+				$out[] = $f;
+			}
+		}
+		$out = array_values( array_unique( $out ) );
+		return count( $out ) >= 2 ? $out : self::CLUSTER_FEATURES;
+	}
+
+	/**
+	 * Столбцы для min–max внутри кластера (базовый список + признаки из формул осей + признаки кластера).
+	 *
+	 * @return list<string>
+	 */
+	private static function collect_normalization_columns(): array {
+		$cols = self::NORMALIZE_WITHIN_CLUSTER;
+		$axis_terms = class_exists( 'WSErgo_Settings' )
+			? WSErgo_Settings::get_macro_axis_terms_resolved()
+			: self::default_macro_axis_terms();
+		foreach ( $axis_terms as $rows ) {
+			foreach ( $rows as $row ) {
+				$sig = sanitize_key( (string) ( $row['signal'] ?? '' ) );
+				if ( $sig !== '' ) {
+					$cols[] = $sig;
+				}
+			}
+		}
+		foreach ( self::get_effective_cluster_features() as $cf ) {
+			$cols[] = $cf;
+		}
+		return array_values( array_unique( $cols ) );
+	}
+
+	/**
+	 * @param \Closure(string): ?float $g
+	 * @param list<array{signal:string, invert:bool, weight:float}> $term_rows
+	 * @return array{0: list<float>, 1: list<float>}
+	 */
+	private static function macro_axis_vals_and_weights( \Closure $g, array $term_rows ): array {
+		$vals = array();
+		$wts  = array();
+		foreach ( $term_rows as $row ) {
+			$sig = sanitize_key( (string) ( $row['signal'] ?? '' ) );
+			$wt  = (float) ( $row['weight'] ?? 0 );
+			if ( $sig === '' || $wt <= 0 ) {
+				continue;
+			}
+			$inv = ! empty( $row['invert'] );
+			$raw = $g( $sig );
+			$vals[] = ( null === $raw ) ? NAN : ( $inv ? ( 1.0 - $raw ) : $raw );
+			$wts[]  = $wt;
+		}
+		return array( $vals, $wts );
+	}
+
+	/**
+	 * @param \Closure(string): ?float $g
+	 * @param list<array{signal:string, invert:bool, weight:float}> $term_rows
+	 */
+	private static function compute_macro_axis_from_terms( \Closure $g, array $term_rows ): float {
+		list( $vals, $wts ) = self::macro_axis_vals_and_weights( $g, $term_rows );
+		return self::weighted_sum_finite( $vals, $wts );
+	}
+
+	/**
 	 * @return array{scores:array<string,array<string,float>>,diag:array<string,array<string,mixed>>,raw_rows:array<string,array<string,float>>}
 	 */
 	private static function compute_full_bundle( int $target_year ): array {
@@ -291,8 +538,10 @@ class WSErgo_Country_Macro_Calculator {
 			return $empty;
 		}
 
+		$cluster_feats = self::get_effective_cluster_features();
+
 		$medians = array();
-		foreach ( self::CLUSTER_FEATURES as $feat ) {
+		foreach ( $cluster_feats as $feat ) {
 			$col = array();
 			foreach ( $rows as $r ) {
 				if ( isset( $r[ $feat ] ) && is_finite( (float) $r[ $feat ] ) ) {
@@ -308,7 +557,7 @@ class WSErgo_Country_Macro_Calculator {
 		foreach ( $rows as $iso3 => $r ) {
 			$vec  = array();
 			$fill = array();
-			foreach ( self::CLUSTER_FEATURES as $feat ) {
+			foreach ( $cluster_feats as $feat ) {
 				$v = isset( $r[ $feat ] ) ? (float) $r[ $feat ] : NAN;
 				if ( ! is_finite( $v ) ) {
 					$v = $medians[ $feat ];
@@ -331,7 +580,7 @@ class WSErgo_Country_Macro_Calculator {
 
 		$n = count( $keys );
 		$norm_cols = array();
-		foreach ( self::NORMALIZE_WITHIN_CLUSTER as $col ) {
+		foreach ( self::collect_normalization_columns() as $col ) {
 			$vals = array();
 			for ( $i = 0; $i < $n; $i++ ) {
 				$iso3   = $keys[ $i ];
@@ -364,70 +613,34 @@ class WSErgo_Country_Macro_Calculator {
 				return is_finite( $v ) ? $v : null;
 			};
 
-			$f_vals = array(
-				1.0 - ( $g( 'pop_dens' ) ?? NAN ),
-				$g( 'urban_share' ) ?? NAN,
-				$g( 'rail_dens' ) ?? NAN,
-				$g( 'avg_urban_dens_500k' ) ?? NAN,
-				$g( 'urban_cases_500k' ) ?? NAN,
-				$g( 'road_dens' ) ?? NAN,
-				$g( 'sdg9' ) ?? NAN,
-			);
-			$F      = self::weighted_sum_finite( $f_vals, array( 0.20, 0.15, 0.20, 0.15, 0.13, 0.12, 0.05 ) );
-			$cm_vals = array(
-				$g( 'forest_share' ) ?? NAN,
-				1.0 - ( $g( 'built_share' ) ?? NAN ),
-				1.0 - ( $g( 'big_city_dens' ) ?? NAN ),
-				$g( 'forest_area_per_capita' ) ?? NAN,
-				1.0 - ( $g( 'pop_dens' ) ?? NAN ),
-				$g( 'sdg11' ) ?? NAN,
-			);
-			$Cm     = self::weighted_sum_finite( $cm_vals, array( 0.30, 0.25, 0.20, 0.10, 0.10, 0.05 ) );
-			$h_vals = array(
-				$g( 'urban_share' ) ?? NAN,
-				$g( 'forest_share' ) ?? NAN,
-				1.0 - ( $g( 'pop_dens' ) ?? NAN ),
-				$g( 'pct_urban_500k' ) ?? NAN,
-				$g( 'sdg11' ) ?? NAN,
-				1.0 - ( $g( 'big_city_ratio' ) ?? NAN ),
-				$g( 'transport_dens' ) ?? NAN,
-				$g( 'urban_land_per_urban_pop' ) ?? NAN,
-			);
-			$H      = self::weighted_sum_finite( $h_vals, array( 0.20, 0.20, 0.15, 0.15, 0.10, 0.10, 0.05, 0.05 ) );
-			$a_vals = array(
-				$g( 'urban_share' ) ?? NAN,
-				$g( 'urban_cases_500k' ) ?? NAN,
-				1.0 - ( $g( 'big_city_ratio' ) ?? NAN ),
-				$g( 'sdg11' ) ?? NAN,
-				$g( 'urban_land_per_urban_pop' ) ?? NAN,
-				1.0 - ( $g( 'avg_urban_dens_500k' ) ?? NAN ),
-				$g( 'built_share' ) ?? NAN,
-			);
-			$A      = self::weighted_sum_finite( $a_vals, array( 0.25, 0.20, 0.20, 0.15, 0.10, 0.05, 0.05 ) );
-			$s_vals = array(
-				$g( 'pop_dens' ) ?? NAN,
-				$g( 'forest_share' ) ?? NAN,
-				$g( 'big_city_dens' ) ?? NAN,
-				1.0 - ( $g( 'sdg_index' ) ?? NAN ),
-				$g( 'sdg16' ) ?? NAN,
-				1.0 - ( $g( 'built_share' ) ?? NAN ),
-				$g( 'rail_dens' ) ?? NAN,
-			);
-			$S      = self::weighted_sum_finite( $s_vals, array( 0.25, 0.20, 0.20, 0.15, 0.10, 0.05, 0.05 ) );
-			$ct_vals = array(
-				1.0 - ( $g( 'avg_urban_dens_500k' ) ?? NAN ),
-				$g( 'urban_cases_500k' ) ?? NAN,
-				$g( 'built_share' ) ?? NAN,
-				$g( 'sdg11' ) ?? NAN,
-				1.0 - ( $g( 'pop_dens' ) ?? NAN ),
-				$g( 'transport_dens' ) ?? NAN,
-				1.0 - ( $g( 'big_city_ratio' ) ?? NAN ),
-			);
-			$Ct     = self::weighted_sum_finite( $ct_vals, array( 0.25, 0.20, 0.15, 0.15, 0.10, 0.10, 0.05 ) );
+			$axis_terms = class_exists( 'WSErgo_Settings' )
+				? WSErgo_Settings::get_macro_axis_terms_resolved()
+				: self::default_macro_axis_terms();
 
+			list( $f_vals, $f_w ) = self::macro_axis_vals_and_weights( $g, $axis_terms['F'] );
+			$F                   = self::compute_macro_axis_from_terms( $g, $axis_terms['F'] );
+			list( $cm_vals, $cm_w ) = self::macro_axis_vals_and_weights( $g, $axis_terms['Cm'] );
+			$Cm                    = self::compute_macro_axis_from_terms( $g, $axis_terms['Cm'] );
+			list( $h_vals, $h_w ) = self::macro_axis_vals_and_weights( $g, $axis_terms['H'] );
+			$H                   = self::compute_macro_axis_from_terms( $g, $axis_terms['H'] );
+			list( $a_vals, $a_w ) = self::macro_axis_vals_and_weights( $g, $axis_terms['A'] );
+			$A                   = self::compute_macro_axis_from_terms( $g, $axis_terms['A'] );
+			list( $s_vals, $s_w ) = self::macro_axis_vals_and_weights( $g, $axis_terms['S'] );
+			$S                   = self::compute_macro_axis_from_terms( $g, $axis_terms['S'] );
+			list( $ct_vals, $ct_w ) = self::macro_axis_vals_and_weights( $g, $axis_terms['Ct'] );
+			$Ct                    = self::compute_macro_axis_from_terms( $g, $axis_terms['Ct'] );
+
+			$ew = class_exists( 'WSErgo_Settings' ) ? WSErgo_Settings::get_macro_e_axis_weights() : array(
+				'F'  => 0.25,
+				'Cm' => 0.22,
+				'H'  => 0.09,
+				'A'  => 0.10,
+				'S'  => 0.20,
+				'Ct' => 0.13,
+			);
 			$E = self::weighted_sum_finite(
 				array( $F, $Cm, $H, $A, $S, $Ct ),
-				array( 0.25, 0.22, 0.09, 0.10, 0.20, 0.13 )
+				array( $ew['F'], $ew['Cm'], $ew['H'], $ew['A'], $ew['S'], $ew['Ct'] )
 			);
 
 			if ( ! isset( $diag[ $iso3 ] ) || ! is_array( $diag[ $iso3 ] ) ) {
@@ -438,12 +651,12 @@ class WSErgo_Country_Macro_Calculator {
 				$diag[ $iso3 ]['cluster_median_imputed_features'] = $fill;
 			}
 			$diag[ $iso3 ]['axis_weight_used'] = array(
-				'F'  => self::finite_weight_fraction( $f_vals, array( 0.20, 0.15, 0.20, 0.15, 0.13, 0.12, 0.05 ) ),
-				'Cm' => self::finite_weight_fraction( $cm_vals, array( 0.30, 0.25, 0.20, 0.10, 0.10, 0.05 ) ),
-				'H'  => self::finite_weight_fraction( $h_vals, array( 0.20, 0.20, 0.15, 0.15, 0.10, 0.10, 0.05, 0.05 ) ),
-				'A'  => self::finite_weight_fraction( $a_vals, array( 0.25, 0.20, 0.20, 0.15, 0.10, 0.05, 0.05 ) ),
-				'S'  => self::finite_weight_fraction( $s_vals, array( 0.25, 0.20, 0.20, 0.15, 0.10, 0.05, 0.05 ) ),
-				'Ct' => self::finite_weight_fraction( $ct_vals, array( 0.25, 0.20, 0.15, 0.15, 0.10, 0.10, 0.05 ) ),
+				'F'  => self::finite_weight_fraction( $f_vals, $f_w ),
+				'Cm' => self::finite_weight_fraction( $cm_vals, $cm_w ),
+				'H'  => self::finite_weight_fraction( $h_vals, $h_w ),
+				'A'  => self::finite_weight_fraction( $a_vals, $a_w ),
+				'S'  => self::finite_weight_fraction( $s_vals, $s_w ),
+				'Ct' => self::finite_weight_fraction( $ct_vals, $ct_w ),
 			);
 
 			if ( ! is_finite( $E ) || $E <= 0 ) {
@@ -721,13 +934,15 @@ class WSErgo_Country_Macro_Calculator {
 	 * @return array{
 	 *   standard: array<string, array<string, array<int, float>>>,
 	 *   sdg: array<string, array<int, array<string, float>>>,
-	 *   worldua: array<string, array{big_city_dens:float, urban_cases_500k:float, avg_urban_dens_500k:float, urban_pop_500k_sum:float}>
+	 *   worldua: array<string, array{big_city_dens:float, urban_cases_500k:float, avg_urban_dens_500k:float, urban_pop_500k_sum:float}>,
+	 *   wide: array<string, array<int, array<string, float>>>
 	 * }
 	 */
 	private static function ingest_uploaded_csvs(): array {
 		$standard = array();
 		$sdg      = array();
 		$worldua  = array();
+		$wide     = array();
 		$sdg_map  = array();
 
 		$files = WorldStat_Uploaded_Csv::list_files();
@@ -777,8 +992,25 @@ class WSErgo_Country_Macro_Calculator {
 				$sdg_map = array_merge( $sdg_map, $parsed['name_to_iso3'] );
 			} elseif ( $type === 'worldua' ) {
 				$worldua = self::parse_worldua_csv( $body, $sdg_map );
+			} elseif ( $type === 'wide_panel' ) {
+				$parsed = self::parse_wide_panel_csv( $body );
+				foreach ( $parsed as $iso3 => $by_year ) {
+					if ( ! isset( $wide[ $iso3 ] ) ) {
+						$wide[ $iso3 ] = array();
+					}
+					foreach ( $by_year as $y => $cols ) {
+						$y = (int) $y;
+						if ( ! isset( $wide[ $iso3 ][ $y ] ) ) {
+							$wide[ $iso3 ][ $y ] = array();
+						}
+						foreach ( $cols as $sig => $v ) {
+							$wide[ $iso3 ][ $y ][ $sig ] = $v;
+						}
+					}
+				}
+				self::wide_panel_seed_standard_metrics( $parsed, $standard );
 			} else {
-				$key = self::metric_key_from_filename( $name );
+				$key = self::metric_key_for_standard_csv_row( $id, $name );
 				if ( $key === null ) {
 					continue;
 				}
@@ -798,6 +1030,7 @@ class WSErgo_Country_Macro_Calculator {
 			'standard' => $standard,
 			'sdg'      => $sdg,
 			'worldua'  => $worldua,
+			'wide'     => $wide,
 		);
 	}
 
@@ -821,7 +1054,345 @@ class WSErgo_Country_Macro_Calculator {
 		if ( strpos( $first, 'geography' ) !== false && strpos( $first, 'population estimate' ) !== false ) {
 			return 'worldua';
 		}
+		$h = self::csv_header_normalized_keys( $body );
+		if ( isset( $h['country_code'], $h['year'] ) ) {
+			$has_long_value = isset( $h['value'] ) || isset( $h['obs_value'] ) || isset( $h['indicator_value'] ) || isset( $h['val'] );
+			$skip           = array( 'country_code' => true, 'year' => true, 'iso3' => true, 'iso' => true, 'cca3' => true, 'country' => true, 'country_name' => true );
+			$data_cols      = 0;
+			foreach ( array_keys( $h ) as $k ) {
+				if ( ! isset( $skip[ $k ] ) ) {
+					++$data_cols;
+				}
+			}
+			if ( ! $has_long_value && $data_cols >= 1 ) {
+				return 'wide_panel';
+			}
+		}
 		return 'standard';
+	}
+
+	/**
+	 * Нормализованные ключи первой строки CSV (заголовок).
+	 *
+	 * @return array<string, true>
+	 */
+	private static function csv_header_normalized_keys( string $body ): array {
+		foreach ( preg_split( "/\r\n|\n|\r/", $body ) as $line ) {
+			$line = trim( (string) $line );
+			if ( $line === '' ) {
+				continue;
+			}
+			$row = str_getcsv( $line );
+			$out  = array();
+			foreach ( $row as $colname ) {
+				$k = self::normalize_csv_header_key( (string) $colname );
+				if ( $k !== '' ) {
+					$out[ $k ] = true;
+				}
+			}
+			return $out;
+		}
+		return array();
+	}
+
+	/**
+	 * CSV «в ширину»: country_code, year и несколько числовых столбцов (как demographics.csv, governance_sdg.csv).
+	 *
+	 * @return array<string, array<int, array<string, float>>>
+	 */
+	private static function parse_wide_panel_csv( string $body ): array {
+		$out         = array();
+		$header_done = false;
+		$h           = array();
+		foreach ( preg_split( "/\r\n|\n|\r/", $body ) as $line ) {
+			$line = trim( (string) $line );
+			if ( $line === '' ) {
+				continue;
+			}
+			$row = str_getcsv( $line );
+			if ( ! $header_done ) {
+				$h = array();
+				foreach ( $row as $ci => $colname ) {
+					$h[ $ci ] = self::normalize_csv_header_key( (string) $colname );
+				}
+				$header_done = true;
+				continue;
+			}
+			$map = array();
+			foreach ( $h as $i => $col ) {
+				$map[ $col ] = $row[ $i ] ?? '';
+			}
+			$cc = strtoupper( trim( (string) ( $map['country_code'] ?? $map['iso3'] ?? $map['cca3'] ?? '' ) ) );
+			$cc = self::resolve_country_token_to_iso3( $cc );
+			if ( strlen( $cc ) !== 3 ) {
+				continue;
+			}
+			$year_raw = trim( (string) ( $map['year'] ?? $map['yr'] ?? '' ) );
+			$year     = (int) $year_raw;
+			if ( $year <= 0 && $year_raw !== '' && preg_match( '/^(\d{4})/', $year_raw, $ym ) ) {
+				$year = (int) $ym[1];
+			}
+			if ( $year <= 0 ) {
+				continue;
+			}
+			$skip = array(
+				'country_code' => true,
+				'year'         => true,
+				'iso3'         => true,
+				'iso'          => true,
+				'cca3'         => true,
+				'country'      => true,
+				'country_name' => true,
+			);
+			$row_out = array();
+			foreach ( $h as $col ) {
+				if ( $col === '' || isset( $skip[ $col ] ) ) {
+					continue;
+				}
+				$raw = str_replace( array( ' ', ',' ), array( '', '.' ), trim( (string) ( $map[ $col ] ?? '' ) ) );
+				if ( $raw === '' || ! is_numeric( $raw ) ) {
+					continue;
+				}
+				$val = (float) $raw;
+				$sig = self::wide_csv_column_to_signal( $col );
+				if ( $sig === '' ) {
+					continue;
+				}
+				if ( self::wide_csv_value_to_unit_interval( $col, $val ) ) {
+					$val = $val / 100.0;
+				}
+				$row_out[ $sig ] = $val;
+			}
+			if ( ! empty( $row_out ) ) {
+				if ( ! isset( $out[ $cc ] ) ) {
+					$out[ $cc ] = array();
+				}
+				$out[ $cc ][ $year ] = isset( $out[ $cc ][ $year ] ) ? array_merge( $out[ $cc ][ $year ], $row_out ) : $row_out;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Имя столбца CSV → ключ признака в строке макро (как в build_feature_rows).
+	 */
+	private static function wide_csv_column_to_signal( string $col ): string {
+		static $map = null;
+		if ( null === $map ) {
+			$map = array(
+				'pop_dens_km2'              => 'pop_dens',
+				'urban_pct'                 => 'urban_share',
+				'urban_land_per_urban'      => 'urban_land_per_urban_pop',
+				'big_city_ratio'            => 'big_city_ratio',
+				'pct_urban_500k'            => 'pct_urban_500k',
+				'urban_growth_pct'          => 'urban_growth_pct',
+				'road_dens'                 => 'road_dens',
+				'rail_dens'                 => 'rail_dens',
+				'transport_dens'            => 'transport_dens',
+				'elec_access_pct'           => 'elec_access',
+				'broadband_per100'          => 'broadband_per100',
+				'internet_pct'              => 'internet_pct',
+				'mobile_per100'             => 'mobile_per100',
+				'lpi_score'                 => 'lpi_score',
+				'lpi_infra'                 => 'lpi_infra',
+				'air_passengers'            => 'air_passengers',
+				'container_teu'             => 'container_teu',
+				'forest_pct'                => 'forest_share',
+				'protected_pct'             => 'protected_pct',
+				'pm25_ug_m3'                => 'pm25_ug_m3',
+				'ghg_per_capita'            => 'ghg_per_capita',
+				'renew_energy_pct'          => 'renew_energy_pct',
+				'clean_cooking_pct'         => 'clean_cooking_pct',
+				'water_prod_usd_m3'         => 'water_prod_usd_m3',
+				'arable_pct'                => 'arable_pct',
+				'life_exp_years'            => 'life_exp_years',
+				'mort_u5_per1000'           => 'mort_u5_per1000',
+				'mort_infant_per1000'       => 'mort_infant_per1000',
+				'mort_neo_per1000'          => 'mort_neo_per1000',
+				'sanitation_safe_pct'       => 'sanitation_safe_pct',
+				'water_safe_pct'            => 'water_safe_pct',
+				'uhc_index'                 => 'uhc_index',
+				'sdg_index'                 => 'sdg_index_score',
+				'sdg9_score'                => 'industry_innovation_infrastructure',
+				'sdg11_score'               => 'sustainable_cities',
+				'sdg16_score'               => 'peace_justice',
+				'cpi_business'              => 'cpi_business',
+				'cpi_corruption'            => 'cpi_corruption',
+				'homicide_per100k'          => 'homicide_per100k',
+				'rnd_gdp_pct'               => 'rnd_gdp_pct',
+				'hi_tech_exp_pct'           => 'hi_tech_exp_pct',
+				'energy_use_kg_oil_cap'     => 'energy_use_kg_oil_cap',
+				'energy_int_mj_gdp_ppp'     => 'energy_int_mj_gdp_ppp',
+				'gdp_per_energy_ppp'        => 'gdp_per_energy_ppp',
+				'renew_elec_pct'            => 'renew_elec_pct',
+			);
+		}
+		return $map[ $col ] ?? $col;
+	}
+
+	/**
+	 * Значения в процентах 0–100 → в доли 0–1 для согласованности с urban_share / forest_share.
+	 *
+	 * @param float $val сырое число из CSV
+	 */
+	private static function wide_csv_value_to_unit_interval( string $col, float $val ): bool {
+		$pct_cols = array(
+			'urban_pct'            => true,
+			'forest_pct'           => true,
+			'sanitation_safe_pct'  => true,
+			'water_safe_pct'       => true,
+			'protected_pct'        => true,
+			'renew_energy_pct'     => true,
+			'clean_cooking_pct'    => true,
+			'arable_pct'           => true,
+			'elec_access_pct'      => true,
+			'internet_pct'         => true,
+			'renew_elec_pct'       => true,
+		);
+		if ( ! isset( $pct_cols[ $col ] ) ) {
+			return false;
+		}
+		if ( $val > 1.0001 || $val < -0.0001 ) {
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * @param array<int, array<string, float>> $by_year
+	 * @return array<string, float>
+	 */
+	private static function pick_wide_year_row( array $by_year, int $target_year ): array {
+		if ( empty( $by_year ) ) {
+			return array();
+		}
+		$best_y = null;
+		$best    = array();
+		foreach ( $by_year as $y => $cols ) {
+			$y = (int) $y;
+			if ( $y > $target_year ) {
+				continue;
+			}
+			if ( $best_y === null || $y > $best_y ) {
+				$best_y = $y;
+				$best   = is_array( $cols ) ? $cols : array();
+			}
+		}
+		if ( $best_y !== null ) {
+			return $best;
+		}
+		foreach ( $by_year as $y => $cols ) {
+			$y = (int) $y;
+			if ( $y <= 0 ) {
+				continue;
+			}
+			if ( $best_y === null || $y > $best_y ) {
+				$best_y = $y;
+				$best   = is_array( $cols ) ? $cols : array();
+			}
+		}
+		return $best;
+	}
+
+	/**
+	 * Подмешивает признаки из широких CSV в строку страны (после базовой сборки).
+	 *
+	 * @param array<string, float> $row
+	 * @param array<int, array<string, float>> $by_year
+	 */
+	private static function apply_wide_panel_overrides( array &$row, array $by_year, int $target_year ): void {
+		$w = self::pick_wide_year_row( $by_year, $target_year );
+		foreach ( $w as $sig => $val ) {
+			if ( ! is_finite( $val ) ) {
+				continue;
+			}
+			$row[ $sig ] = $val;
+		}
+	}
+
+	/**
+	 * Подставляет значение стандартного ряда из wide, если для (iso3, год) ещё нет long-данных.
+	 *
+	 * @param array<string, array<string, array<int, float>>> $standard
+	 */
+	private static function wide_panel_seed_metric_if_absent( array &$standard, string $metric_key, string $iso3, int $year, float $val ): void {
+		if ( $val <= 0 || ! is_finite( $val ) ) {
+			return;
+		}
+		if ( isset( $standard[ $metric_key ][ $iso3 ][ $year ] ) ) {
+			return;
+		}
+		if ( ! isset( $standard[ $metric_key ] ) ) {
+			$standard[ $metric_key ] = array();
+		}
+		if ( ! isset( $standard[ $metric_key ][ $iso3 ] ) ) {
+			$standard[ $metric_key ][ $iso3 ] = array();
+		}
+		$standard[ $metric_key ][ $iso3 ][ $year ] = $val;
+	}
+
+	/**
+	 * Подставляет в стандартные ряды значения из широкого CSV (плотность, урбанизация, лес, население, площадь по типовым столбцам).
+	 *
+	 * @param array<string, array<int, array<string, float>>>  $parsed
+	 * @param array<string, array<string, array<int, float>>> $standard
+	 */
+	private static function wide_panel_seed_standard_metrics( array $parsed, array &$standard ): void {
+		$pop_cols = array(
+			'population_total',
+			'total_population',
+			'pop_total',
+			'population',
+			'sp_pop_totl',
+			'sppoptotl',
+			'pop',
+			'tot_pop',
+			'pop_tot',
+		);
+		$area_cols = array(
+			'surface_area_sqkm',
+			'land_area_sqkm',
+			'land_area',
+			'country_area',
+			'country_area_sqkm',
+			'area_sq_km',
+			'areasqkm',
+			'surface_area',
+			'geographic_area',
+			'ag_land_sqkm',
+			'land_sq_km',
+		);
+		foreach ( $parsed as $iso3 => $by_year ) {
+			foreach ( $by_year as $y => $cols ) {
+				$y = (int) $y;
+				if ( ! is_array( $cols ) ) {
+					continue;
+				}
+				foreach ( $pop_cols as $ck ) {
+					if ( isset( $cols[ $ck ] ) && is_finite( (float) $cols[ $ck ] ) ) {
+						self::wide_panel_seed_metric_if_absent( $standard, 'population_total', $iso3, $y, (float) $cols[ $ck ] );
+						break;
+					}
+				}
+				foreach ( $area_cols as $ck ) {
+					if ( isset( $cols[ $ck ] ) && is_finite( (float) $cols[ $ck ] ) ) {
+						self::wide_panel_seed_metric_if_absent( $standard, 'surface_area_sqkm', $iso3, $y, (float) $cols[ $ck ] );
+						break;
+					}
+				}
+				if ( isset( $cols['pop_dens'] ) && is_finite( (float) $cols['pop_dens'] ) ) {
+					self::wide_panel_seed_metric_if_absent( $standard, 'population_density_per_km2', $iso3, $y, (float) $cols['pop_dens'] );
+				} elseif ( isset( $cols['population_density_per_km2'] ) && is_finite( (float) $cols['population_density_per_km2'] ) ) {
+					self::wide_panel_seed_metric_if_absent( $standard, 'population_density_per_km2', $iso3, $y, (float) $cols['population_density_per_km2'] );
+				}
+				if ( isset( $cols['urban_share'] ) && is_finite( (float) $cols['urban_share'] ) ) {
+					self::wide_panel_seed_metric_if_absent( $standard, 'urban_share_percent', $iso3, $y, (float) $cols['urban_share'] * 100.0 );
+				}
+				if ( isset( $cols['forest_share'] ) && is_finite( (float) $cols['forest_share'] ) ) {
+					self::wide_panel_seed_metric_if_absent( $standard, 'forest_percentage', $iso3, $y, (float) $cols['forest_share'] * 100.0 );
+				}
+			}
+		}
 	}
 
 	/**
@@ -832,6 +1403,24 @@ class WSErgo_Country_Macro_Calculator {
 		$c   = strtolower( str_replace( array( "\t", ' ', '-' ), '_', $col ) );
 		$c   = (string) preg_replace( '/_+/', '_', $c );
 		return (string) preg_replace( '/[^a-z0-9_]/', '', $c );
+	}
+
+	/**
+	 * Явная привязка id CSV в БД к ключу ряда (иначе — по имени файла).
+	 */
+	private static function metric_key_for_standard_csv_row( int $file_id, string $filename ): ?string {
+		if ( $file_id > 0 && class_exists( 'WSErgo_Settings' ) ) {
+			$bindings = WSErgo_Settings::get_macro_csv_bindings();
+			foreach ( $bindings as $metric_key => $bound_id ) {
+				if ( (int) $bound_id === $file_id ) {
+					$allowed = array_flip( self::STANDARD_METRIC_KEYS );
+					if ( isset( $allowed[ $metric_key ] ) ) {
+						return $metric_key;
+					}
+				}
+			}
+		}
+		return self::metric_key_from_filename( $filename );
 	}
 
 	private static function metric_key_from_filename( string $filename ): ?string {
@@ -1135,6 +1724,7 @@ class WSErgo_Country_Macro_Calculator {
 		$standard = $ingest['standard'];
 		$sdg      = $ingest['sdg'];
 		$worldua  = $ingest['worldua'];
+		$wide     = isset( $ingest['wide'] ) && is_array( $ingest['wide'] ) ? $ingest['wide'] : array();
 
 		$iso3s = array();
 		foreach ( array_keys( $sdg ) as $cc ) {
@@ -1147,6 +1737,9 @@ class WSErgo_Country_Macro_Calculator {
 			foreach ( array_keys( $by_country ) as $cc ) {
 				$iso3s[ $cc ] = true;
 			}
+		}
+		foreach ( array_keys( $wide ) as $cc ) {
+			$iso3s[ $cc ] = true;
 		}
 
 		$out  = array();
@@ -1189,10 +1782,24 @@ class WSErgo_Country_Macro_Calculator {
 			} elseif ( null !== $area && null !== $pden && $pden > 0 && null === $pop ) {
 				$pop                = $area * $pden;
 				$triangle_derived[] = 'population_total';
+			} elseif ( null !== $pden && $pden > 0 && null === $pop && null === $area ) {
+				// Учебные wide-наборы: только pop_dens_km2 — без реального населения/площади. Условный масштаб с pop/area = pden,
+				// чтобы строились признаки и кластеризация; абсолютные величины «на душу» и km² застройки к реальным странам не привязаны.
+				$pop                = 1.0e9;
+				$area               = $pop / $pden;
+				$triangle_derived[] = 'population_total';
+				$triangle_derived[] = 'surface_area_sqkm';
 			}
 			if ( null === $pop || null === $area || null === $pden || $pop <= 0 || $area <= 0 || $pden <= 0 ) {
 				continue;
 			}
+
+			$synthetic_triangle_baseline = (
+				in_array( 'population_total', $triangle_derived, true )
+				&& in_array( 'surface_area_sqkm', $triangle_derived, true )
+				&& null === $raw_csv['population_total']
+				&& null === $raw_csv['surface_area_sqkm']
+			);
 
 			$missing_series = array();
 			foreach ( self::STANDARD_METRIC_KEYS as $mk ) {
@@ -1216,7 +1823,8 @@ class WSErgo_Country_Macro_Calculator {
 			} else {
 				$transport_dens = NAN;
 			}
-			$forest_area_per_capita = ( null === $frp || $pop <= 0 ) ? NAN : ( ( ( $frp * $area ) / 100.0 ) / $pop );
+			// Площадь страны в км², доля леса в % → лесная площадь на душу в м²/чел. (раньше ошибочно оставались км²/чел при подписи «м²»).
+			$forest_area_per_capita = ( null === $frp || $pop <= 0 ) ? NAN : ( ( ( $frp * $area ) / 100.0 ) / $pop ) * 1_000_000.0;
 
 			$sdg_row   = self::pick_sdg_row( $sdg[ $iso3 ] ?? array(), $target_year );
 			$sdg_absent = ( null === $sdg_row );
@@ -1233,7 +1841,8 @@ class WSErgo_Country_Macro_Calculator {
 
 			$pop_dens = ( ( $pop / $area ) + $pden ) / 2.0;
 			$urban_denom              = ( is_finite( $urban_share ) && $urban_share > 0 ) ? ( $urban_share * $pop ) : NAN;
-			$urban_land_per_urban_pop = ( is_finite( $urban_denom ) && $urban_denom > 0 && null !== $ulnd ) ? ( $ulnd / $urban_denom ) : NAN;
+			// urban_land_area_sqkm / число городских жителей → м² на городского жителя (раньше оставалось в км² при подписи «м²»).
+			$urban_land_per_urban_pop = ( is_finite( $urban_denom ) && $urban_denom > 0 && null !== $ulnd ) ? ( ( $ulnd / $urban_denom ) * 1_000_000.0 ) : NAN;
 			$pct_urban_500k           = $pop > 0 ? ( $wu['urban_pop_500k_sum'] / $pop ) : 0.0;
 
 			$row = array(
@@ -1257,8 +1866,15 @@ class WSErgo_Country_Macro_Calculator {
 				'peace_justice'                      => (float) ( $sdg_row['peace_justice'] ?? NAN ),
 			);
 
+			self::apply_wide_panel_overrides( $row, $wide[ $iso3 ] ?? array(), $target_year );
+
+			$td = isset( $row['transport_dens'] ) ? (float) $row['transport_dens'] : NAN;
+			if ( ! is_finite( $td ) && isset( $row['road_dens'], $row['rail_dens'] ) && is_finite( (float) $row['road_dens'] ) && is_finite( (float) $row['rail_dens'] ) ) {
+				$row['transport_dens'] = (float) $row['road_dens'] + (float) $row['rail_dens'];
+			}
+
 			$nan_feats = array();
-			foreach ( self::CLUSTER_FEATURES as $feat ) {
+			foreach ( self::get_effective_cluster_features() as $feat ) {
 				if ( ! isset( $row[ $feat ] ) || ! is_finite( (float) $row[ $feat ] ) ) {
 					$nan_feats[] = $feat;
 				}
@@ -1270,6 +1886,9 @@ class WSErgo_Country_Macro_Calculator {
 				'sdg_row_absent'           => $sdg_absent,
 				'features_nonfinite'       => $nan_feats,
 			);
+			if ( $synthetic_triangle_baseline ) {
+				$diag[ $iso3 ]['triangle_dimensionless_baseline'] = true;
+			}
 
 			$out[ $iso3 ] = $row;
 		}

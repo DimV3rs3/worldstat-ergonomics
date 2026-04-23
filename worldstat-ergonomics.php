@@ -90,6 +90,16 @@ add_action(
 );
 
 add_action(
+	'update_option_wsp_csv_files_revision',
+	static function () {
+		if ( class_exists( 'WSErgo_Settings' ) ) {
+			WSErgo_Settings::sync_macro_csv_bindings_with_storage();
+		}
+	},
+	10
+);
+
+add_action(
 	'worldstat_init',
 	function () {
 		WorldStat_Extensions::register(
@@ -199,6 +209,38 @@ add_action(
 );
 add_action(
 	'update_option_' . WSErgo_Settings::OPTION_COUNTRY_INDEX_SOURCE,
+	static function () {
+		if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			WSErgo_Country_Macro_Calculator::flush_cache();
+		}
+	}
+);
+add_action(
+	'update_option_' . WSErgo_Settings::OPTION_MACRO_CSV_BINDINGS,
+	static function () {
+		if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			WSErgo_Country_Macro_Calculator::flush_cache();
+		}
+	}
+);
+add_action(
+	'update_option_' . WSErgo_Settings::OPTION_MACRO_E_AXIS_WEIGHTS,
+	static function () {
+		if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			WSErgo_Country_Macro_Calculator::flush_cache();
+		}
+	}
+);
+add_action(
+	'update_option_' . WSErgo_Settings::OPTION_MACRO_CLUSTER_FEATURES,
+	static function () {
+		if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			WSErgo_Country_Macro_Calculator::flush_cache();
+		}
+	}
+);
+add_action(
+	'update_option_' . WSErgo_Settings::OPTION_MACRO_AXIS_TERMS,
 	static function () {
 		if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
 			WSErgo_Country_Macro_Calculator::flush_cache();

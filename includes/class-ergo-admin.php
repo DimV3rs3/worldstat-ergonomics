@@ -12,6 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 class WSErgo_Admin {
 
 	public function __construct() {
+		add_action( 'admin_init', [ $this, 'redirect_legacy_countries_menu' ], 1 );
 		add_action( 'admin_init', [ $this, 'register_settings' ] );
 		add_action( 'add_meta_boxes', [ $this, 'add_meta_boxes' ] );
 		add_action( 'admin_menu', [ $this, 'add_import_page' ], 9 );
@@ -28,23 +29,32 @@ class WSErgo_Admin {
 	public function add_worldstat_submenu(): void {
 		add_submenu_page(
 			'worldstat',
-			__( 'Эргономика', 'worldstat-ergonomics' ),
-			__( 'Эргономика', 'worldstat-ergonomics' ),
+			__( 'Эргономичность', 'worldstat-ergonomics' ),
+			__( 'Эргономичность', 'worldstat-ergonomics' ),
 			'manage_options',
 			'wsergo-settings',
 			[ $this, 'render_settings_page' ]
 		);
-		add_submenu_page(
-			'worldstat',
-			__( 'Эргономика стран', 'worldstat-ergonomics' ),
-			__( 'Эргономика стран', 'worldstat-ergonomics' ),
-			'manage_options',
-			'wsergo-countries',
-			[ $this, 'render_countries_page' ]
-		);
+	}
+
+	/**
+	 * Старый пункт меню «Эргономика стран» убран — перенаправляем на вкладку настроек страны.
+	 */
+	public function redirect_legacy_countries_menu(): void {
+		if ( ! is_admin() || ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- только редирект по slug страницы.
+		if ( isset( $_GET['page'] ) && (string) wp_unslash( $_GET['page'] ) === 'wsergo-countries' ) {
+			wp_safe_redirect( admin_url( 'admin.php?page=wsergo-settings#tab-data' ) );
+			exit;
+		}
 	}
 
 	public function register_settings(): void {
+		if ( isset( $_GET['page'] ) && (string) $_GET['page'] === 'wsergo-settings' && current_user_can( 'manage_options' ) && class_exists( 'WSErgo_Settings' ) ) {
+			WSErgo_Settings::sync_macro_csv_bindings_with_storage();
+		}
 		if ( ! get_option( 'wsergo_methodology_version', null ) ) {
 			add_option( 'wsergo_methodology_version', '1.2' );
 		}
@@ -156,6 +166,51 @@ class WSErgo_Admin {
 				'default'           => 6,
 			]
 		);
+		register_setting(
+			'wsergo_settings',
+			WSErgo_Settings::OPTION_MACRO_CSV_BINDINGS,
+			[
+				'type'              => 'array',
+				'sanitize_callback' => [ $this, 'sanitize_macro_csv_bindings' ],
+				'default'           => [],
+			]
+		);
+		register_setting(
+			'wsergo_settings',
+			WSErgo_Settings::OPTION_MACRO_E_AXIS_WEIGHTS,
+			[
+				'type'              => 'array',
+				'sanitize_callback' => [ $this, 'sanitize_macro_e_axis_weights' ],
+				'default'           => [],
+			]
+		);
+		register_setting(
+			'wsergo_settings',
+			WSErgo_Settings::OPTION_MACRO_EXTRA_SIGNALS_TEXT,
+			[
+				'type'              => 'string',
+				'sanitize_callback' => [ $this, 'sanitize_macro_extra_signals_text' ],
+				'default'           => '',
+			]
+		);
+		register_setting(
+			'wsergo_settings',
+			WSErgo_Settings::OPTION_MACRO_CLUSTER_FEATURES,
+			[
+				'type'              => 'array',
+				'sanitize_callback' => [ $this, 'sanitize_macro_cluster_features' ],
+				'default'           => [],
+			]
+		);
+		register_setting(
+			'wsergo_settings',
+			WSErgo_Settings::OPTION_MACRO_AXIS_TERMS,
+			[
+				'type'              => 'array',
+				'sanitize_callback' => [ $this, 'sanitize_macro_axis_terms' ],
+				'default'           => [],
+			]
+		);
 	}
 
 	/**
@@ -188,6 +243,119 @@ class WSErgo_Admin {
 	public function sanitize_macro_k_clusters( $input ): int {
 		$k = is_numeric( $input ) ? (int) $input : 6;
 		return max( 2, min( 12, $k ) );
+	}
+
+	/**
+	 * @param mixed $input
+	 * @return array<string, int>
+	 */
+	public function sanitize_macro_csv_bindings( $input ): array {
+		if ( ! is_array( $input ) ) {
+			return [];
+		}
+		if ( ! class_exists( 'WSErgo_Country_Macro_Calculator' ) || ! class_exists( 'WSErgo_Settings' ) ) {
+			return [];
+		}
+		$allowed = array_flip( WSErgo_Country_Macro_Calculator::bindable_standard_metric_keys() );
+		$valid_ids = WSErgo_Settings::valid_macro_csv_source_ids();
+		$out       = [];
+		foreach ( $input as $k => $v ) {
+			$mk = sanitize_key( (string) $k );
+			if ( $mk === '' || ! isset( $allowed[ $mk ] ) ) {
+				continue;
+			}
+			$id = (int) $v;
+			if ( $id > 0 && isset( $valid_ids[ $id ] ) ) {
+				$out[ $mk ] = $id;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * @param mixed $input
+	 * @return array<string, float>
+	 */
+	public function sanitize_macro_e_axis_weights( $input ): array {
+		$axes    = [ 'F', 'Cm', 'H', 'A', 'S', 'Ct' ];
+		$default = [
+			'F'  => 0.25,
+			'Cm' => 0.22,
+			'H'  => 0.09,
+			'A'  => 0.10,
+			'S'  => 0.20,
+			'Ct' => 0.13,
+		];
+		if ( ! is_array( $input ) ) {
+			return $default;
+		}
+		$out = [];
+		foreach ( $axes as $axis ) {
+			$w = isset( $input[ $axis ] ) ? (float) $input[ $axis ] : $default[ $axis ];
+			$out[ $axis ] = $w > 0 ? $w : $default[ $axis ];
+		}
+		$sum = array_sum( $out );
+		if ( $sum <= 1e-15 ) {
+			return $default;
+		}
+		foreach ( $out as $axis => $w ) {
+			$out[ $axis ] = $w / $sum;
+		}
+		return $out;
+	}
+
+	/**
+	 * @param mixed $input
+	 * @return list<string>
+	 */
+	/**
+	 * @param mixed $input
+	 */
+	public function sanitize_macro_extra_signals_text( $input ): string {
+		if ( ! class_exists( 'WSErgo_Settings' ) ) {
+			return '';
+		}
+		$s = is_string( $input ) ? $input : '';
+		$arr = WSErgo_Settings::parse_macro_extra_signals_string( $s );
+		return implode( "\n", $arr );
+	}
+
+	public function sanitize_macro_cluster_features( $input ): array {
+		if ( ! is_array( $input ) || ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			return [];
+		}
+		$allow = array_flip( WSErgo_Country_Macro_Calculator::macro_signal_allowlist() );
+		$out   = array();
+		foreach ( $input as $x ) {
+			$k = sanitize_key( (string) $x );
+			if ( $k !== '' && isset( $allow[ $k ] ) ) {
+				$out[] = $k;
+			}
+		}
+		$out = array_values( array_unique( $out ) );
+		return count( $out ) >= 2 ? $out : [];
+	}
+
+	/**
+	 * @param mixed $input
+	 * @return array<string, list<array{signal:string, invert:bool, weight:float}>>
+	 */
+	public function sanitize_macro_axis_terms( $input ): array {
+		if ( ! is_array( $input ) || ! class_exists( 'WSErgo_Settings' ) ) {
+			return [];
+		}
+		$axes = array( 'F', 'Cm', 'H', 'A', 'S', 'Ct' );
+		$out  = array();
+		foreach ( $axes as $ax ) {
+			if ( ! isset( $input[ $ax ] ) || ! is_array( $input[ $ax ] ) ) {
+				continue;
+			}
+			$san = WSErgo_Settings::sanitize_macro_axis_terms_rows( $input[ $ax ] );
+			if ( count( $san ) > 0 ) {
+				$out[ $ax ] = $san;
+			}
+		}
+		return $out;
 	}
 
 	/**
@@ -606,13 +774,106 @@ class WSErgo_Admin {
 			wp_add_inline_script(
 				'jquery',
 				"jQuery(function($){
-					$('.wsergo-tab-nav a').on('click', function(e){
+					var wsergoMacroOpt = '" . esc_js( WSErgo_Settings::OPTION_MACRO_AXIS_TERMS ) . "';
+					function wsergoReplaceHash(hash){
+						if(!window.history || !window.history.replaceState){ return; }
+						var base = window.location.pathname + window.location.search;
+						window.history.replaceState(null, '', base + hash);
+					}
+					function wsergoActivateScope(scope){
+						if(!scope){ scope = 'country'; }
+						$('.wsergo-ergo-scope-nav a').removeClass('nav-tab-active');
+						$('.wsergo-ergo-scope-nav a[data-wsergo-scope=\"'+scope+'\"]').addClass('nav-tab-active');
+						$('.wsergo-scope-panel').hide();
+						$('#wsergo-panel-'+scope).show();
+					}
+					function wsergoActivateInnerTab(id){
+						if(!id){ return; }
+						var \$a = $('.wsergo-country-inner-nav a[data-tab=\"'+id+'\"]');
+						if(!\$a.length){ return; }
+						$('.wsergo-country-inner-nav a').removeClass('nav-tab-active');
+						\$a.addClass('nav-tab-active');
+						var \$f = $('#wsergo-panel-country form.wsergo-settings-form');
+						\$f.find('.wsergo-tab-panel').hide();
+						\$f.find('#' + id).show();
+					}
+					function wsergoApplyHash(){
+						var h = window.location.hash || '';
+						if(h === '#ergo-city'){
+							wsergoActivateScope('city');
+							return;
+						}
+						if(h === '#ergo-territory'){
+							wsergoActivateScope('territory');
+							return;
+						}
+						wsergoActivateScope('country');
+						if(h.indexOf('#tab-') === 0){
+							wsergoActivateInnerTab(h.replace('#',''));
+						} else {
+							wsergoActivateInnerTab('tab-measure');
+						}
+					}
+					$('.wsergo-ergo-scope-nav a[data-wsergo-scope]').on('click', function(e){
+						e.preventDefault();
+						var scope = $(this).data('wsergo-scope');
+						if(scope === 'country'){
+							wsergoActivateScope('country');
+							wsergoActivateInnerTab('tab-measure');
+							wsergoReplaceHash('#ergo-country');
+						} else if(scope === 'city'){
+							wsergoActivateScope('city');
+							wsergoReplaceHash('#ergo-city');
+						} else if(scope === 'territory'){
+							wsergoActivateScope('territory');
+							wsergoReplaceHash('#ergo-territory');
+						}
+					});
+					$('.wsergo-country-inner-nav a[data-tab]').on('click', function(e){
 						e.preventDefault();
 						var id = $(this).data('tab');
-						$('.wsergo-tab-nav a').removeClass('nav-tab-active');
-						$(this).addClass('nav-tab-active');
-						$('.wsergo-tab-panel').hide();
-						$('#'+id).show();
+						wsergoActivateScope('country');
+						wsergoActivateInnerTab(id);
+						wsergoReplaceHash('#' + id);
+					});
+					wsergoApplyHash();
+					$(window).on('hashchange', function(){ wsergoApplyHash(); });
+					$(document).on('click', 'a.wsergo-tab-deep-link[href^=\"#tab-\"]', function(e){
+						var href = $(this).attr('href') || '';
+						if(href.indexOf('#tab-') !== 0){ return; }
+						e.preventDefault();
+						wsergoActivateScope('country');
+						wsergoActivateInnerTab(href.substring(1));
+						wsergoReplaceHash(href);
+					});
+					function wsergoMacroNextIndex(\$tb, axis){
+						var prefix = wsergoMacroOpt + '[' + axis + '][';
+						var maxIx = -1;
+						\$tb.find('tr').not('.wsergo-macro-term-template').each(function(){
+							$(this).find('select[name], input[name]').each(function(){
+								var n = this.name || '';
+								var p = n.indexOf(prefix);
+								if(p === -1){ return; }
+								var rest = n.substring(p + prefix.length);
+								var m = /^(\d+)\]/.exec(rest);
+								if(m){ maxIx = Math.max(maxIx, parseInt(m[1], 10)); }
+							});
+						});
+						return maxIx + 1;
+					}
+					$(document).on('click', '.wsergo-add-macro-term-row', function(){
+						var axis = $(this).data('axis');
+						var \$tb = $('tbody.wsergo-macro-axis-tbody[data-axis=\"'+axis+'\"]');
+						var \$tpl = \$tb.find('tr.wsergo-macro-term-template').first();
+						if(!\$tpl.length){ return; }
+						var nextIx = wsergoMacroNextIndex(\$tb, axis);
+						var \$n = \$tpl.clone();
+						\$n.removeClass('wsergo-macro-term-template').removeAttr('style').removeAttr('aria-hidden').show();
+						\$n.find('input, select').prop('disabled', false);
+						\$n.find('input, select').each(function(){
+							if(this.name){ this.name = this.name.replace(/999999/g, String(nextIx)); }
+						});
+						\$tb.append(\$n);
 					});
 					$('#wsergo-test-formula-btn').on('click', function(){
 						var formula = $('#wsergo_test_formula_inline').length ? $('#wsergo_test_formula_inline').val() : $('textarea[name=\"wsergo_models[0][leaf_formula]\"]').first().val();
@@ -630,13 +891,6 @@ class WSErgo_Admin {
 						\$n.find('input[name\$=\"[vmin]\"]').val('0');
 						\$n.find('input[name\$=\"[vmax]\"]').val('100');
 						\$n.find('input[name\$=\"[weight]\"]').val('1');
-						\$tpl.before(\$n);
-					});
-					$('#wsergo-add-city-map-row').on('click', function(){
-						var \$tpl = $('#wsergo-city-map-rows tr.wsergo-city-map-template');
-						if(!\$tpl.length){ return; }
-						var \$n = \$tpl.clone().removeClass('wsergo-city-map-template').show();
-						\$n.find('select').prop('selectedIndex', 0);
 						\$tpl.before(\$n);
 					});
 				});"
@@ -944,67 +1198,6 @@ class WSErgo_Admin {
 		);
 	}
 
-	public function render_countries_page(): void {
-		if ( ! current_user_can( 'manage_options' ) ) {
-			return;
-		}
-		$mode         = WSErgo_Settings::get_country_variation();
-		$index_source = WSErgo_Settings::get_country_index_source();
-		$macro_year   = WSErgo_Settings::get_macro_reference_year();
-		$macro_k      = WSErgo_Settings::get_macro_k_clusters();
-		settings_errors();
-		?>
-		<div class="wrap">
-			<h1><?php esc_html_e( 'Режимы расчета эргономики', 'worldstat-ergonomics' ); ?></h1>
-			<p class="description">
-				<?php esc_html_e( 'Переключайте режим плагина: городской (как в начальной версии) или страновой (новая вариация).', 'worldstat-ergonomics' ); ?>
-			</p>
-			<form method="post" action="options.php">
-				<?php settings_fields( 'wsergo_settings' ); ?>
-				<table class="form-table">
-					<tr>
-						<th scope="row"><label for="wsergo_country_index_source"><?php esc_html_e( 'Индекс страны (карта, метрики)', 'worldstat-ergonomics' ); ?></label></th>
-						<td>
-							<select id="wsergo_country_index_source" name="<?php echo esc_attr( WSErgo_Settings::OPTION_COUNTRY_INDEX_SOURCE ); ?>">
-								<option value="macro_datasets" <?php selected( $index_source, 'macro_datasets' ); ?>><?php esc_html_e( 'Макроданные (CSV платформы, без городов)', 'worldstat-ergonomics' ); ?></option>
-								<option value="city_aggregate" <?php selected( $index_source, 'city_aggregate' ); ?>><?php esc_html_e( 'Агрегация по городам (legacy)', 'worldstat-ergonomics' ); ?></option>
-							</select>
-							<p class="description">
-								<?php esc_html_e( 'Макроданные: страновые ряды из загруженных CSV (тип country / indicator), опорный год и k-means. Агрегация по городам: взвешивание по населению T3 и настройкам ниже.', 'worldstat-ergonomics' ); ?>
-							</p>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="wsergo_macro_reference_year"><?php esc_html_e( 'Опорный год (макро)', 'worldstat-ergonomics' ); ?></label></th>
-						<td>
-							<input type="number" id="wsergo_macro_reference_year" name="<?php echo esc_attr( WSErgo_Settings::OPTION_MACRO_REFERENCE_YEAR ); ?>" value="<?php echo esc_attr( (string) $macro_year ); ?>" class="small-text" min="1900" max="2100" step="1" />
-							<p class="description"><?php esc_html_e( 'Год для выборки значений country_code + year в CSV (если в файле есть столбец года).', 'worldstat-ergonomics' ); ?></p>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="wsergo_macro_k_clusters"><?php esc_html_e( 'Число кластеров k-means (макро)', 'worldstat-ergonomics' ); ?></label></th>
-						<td>
-							<input type="number" id="wsergo_macro_k_clusters" name="<?php echo esc_attr( WSErgo_Settings::OPTION_MACRO_K_CLUSTERS ); ?>" value="<?php echo esc_attr( (string) $macro_k ); ?>" class="small-text" min="2" max="12" step="1" />
-							<p class="description"><?php esc_html_e( 'Нормализация min–max выполняется внутри кластера стран.', 'worldstat-ergonomics' ); ?></p>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="wsergo_country_variation"><?php esc_html_e( 'Режим агрегации по городам', 'worldstat-ergonomics' ); ?></label></th>
-						<td>
-							<select id="wsergo_country_variation" name="<?php echo esc_attr( WSErgo_Settings::OPTION_COUNTRY_VARIATION ); ?>">
-								<option value="city_direct" <?php selected( $mode, 'city_direct' ); ?>><?php esc_html_e( '1) Городской (как в начальной версии)', 'worldstat-ergonomics' ); ?></option>
-								<option value="regions" <?php selected( $mode, 'regions' ); ?>><?php esc_html_e( '2) Страновой (через регионы)', 'worldstat-ergonomics' ); ?></option>
-							</select>
-							<p class="description"><?php esc_html_e( 'Используется только при источнике «Агрегация по городам». Режим 1 — прямое взвешенное среднее по городам. Режим 2 — сначала по регионам, затем по стране; см. вкладку «Агрегация» в основных настройках.', 'worldstat-ergonomics' ); ?></p>
-						</td>
-					</tr>
-				</table>
-				<?php submit_button(); ?>
-			</form>
-		</div>
-		<?php
-	}
-
 	public function render_settings_page(): void {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -1017,7 +1210,6 @@ class WSErgo_Admin {
 		$models       = WSErgo_Settings::get_models();
 		$active_id    = (string) get_option( WSErgo_Settings::OPTION_ACTIVE_MODEL, 'default_weighted' );
 		$coeffs       = WSErgo_Settings::get_coefficients();
-		$agg          = WSErgo_Settings::get_aggregation();
 		$active_model = WSErgo_Settings::get_active_model();
 		$allowed_txt  = implode( ', ', array_keys( WSErgo_Settings::get_leaf_formula_allowed_ids() ) );
 		$indicator_defs = get_option( WSErgo_Indicators::OPTION_DEFINITIONS, [] );
@@ -1025,87 +1217,64 @@ class WSErgo_Admin {
 			$indicator_defs = [];
 		}
 		$indicator_defs = array_values( $indicator_defs );
-		$city_field_map   = get_option( WSErgo_Settings::OPTION_CITY_FIELD_MAP, [] );
-		if ( ! is_array( $city_field_map ) ) {
-			$city_field_map = [];
+		$macro_year       = WSErgo_Settings::get_macro_reference_year();
+		$macro_k          = WSErgo_Settings::get_macro_k_clusters();
+		$macro_bindings   = WSErgo_Settings::get_macro_csv_bindings();
+		$macro_e_w        = WSErgo_Settings::get_macro_e_axis_weights();
+		$csv_files = [];
+		if ( class_exists( 'WorldStat_Uploaded_Csv' ) && WorldStat_Uploaded_Csv::table_exists() ) {
+			$csv_files = WorldStat_Uploaded_Csv::list_files();
 		}
-		$city_field_map   = array_values( $city_field_map );
-		$source_choices   = class_exists( 'WSErgo_City_Bridge' ) ? WSErgo_City_Bridge::get_source_choices() : [];
-		$calc_mode        = WSErgo_Settings::get_country_variation();
-		$calc_mode_label  = 'regions' === $calc_mode
-			? __( '2) Страновой (через регионы)', 'worldstat-ergonomics' )
-			: __( '1) Городской (как в начальной версии)', 'worldstat-ergonomics' );
+		$metric_labels_ru = class_exists( 'WSErgo_Country_Macro_Calculator' )
+			? WSErgo_Country_Macro_Calculator::standard_metric_labels_ru()
+			: [];
+		$stored_cf          = WSErgo_Settings::get_macro_cluster_features();
+		$default_cf           = class_exists( 'WSErgo_Country_Macro_Calculator' ) ? WSErgo_Country_Macro_Calculator::default_cluster_features() : [];
+		$cf_for_checkboxes    = count( $stored_cf ) >= 2 ? $stored_cf : $default_cf;
+		$macro_axis_resolved = WSErgo_Settings::get_macro_axis_terms_resolved();
+		$signals_ui          = class_exists( 'WSErgo_Country_Macro_Calculator' ) ? WSErgo_Country_Macro_Calculator::macro_signal_allowlist() : [];
+		$macro_axis_labels   = class_exists( 'WSErgo_Country_Macro_Calculator' ) ? WSErgo_Country_Macro_Calculator::macro_axis_labels_ru() : [];
+		$macro_extra_signals_text = class_exists( 'WSErgo_Settings' ) ? (string) get_option( WSErgo_Settings::OPTION_MACRO_EXTRA_SIGNALS_TEXT, '' ) : '';
 
 		settings_errors();
 		?>
 		<div class="wrap">
-			<h1><?php esc_html_e( 'Эргономика: настройки', 'worldstat-ergonomics' ); ?></h1>
+			<h1><?php esc_html_e( 'Эргономичность', 'worldstat-ergonomics' ); ?></h1>
+			<p class="description" style="margin-top:0;">
+				<?php esc_html_e( 'Страновый индекс: CSV в разделе «Данные CSV» (в т.ч. широкие файлы country_code + year + несколько показателей), кластеризация, оси F / Cm / H / A / S / Ct и итоговый E. Рабочие настройки — под «Эргономичность страны»; город и территория пока заглушки.', 'worldstat-ergonomics' ); ?>
+			</p>
+
+			<h2 class="nav-tab-wrapper wsergo-ergo-scope-nav" style="margin-bottom:4px;">
+				<a href="#ergo-country" class="nav-tab nav-tab-active" data-wsergo-scope="country"><?php esc_html_e( 'Эргономичность страны', 'worldstat-ergonomics' ); ?></a>
+				<a href="#ergo-city" class="nav-tab" data-wsergo-scope="city"><?php esc_html_e( 'Эргономичность города', 'worldstat-ergonomics' ); ?></a>
+				<a href="#ergo-territory" class="nav-tab" data-wsergo-scope="territory"><?php esc_html_e( 'Эргономичность территории', 'worldstat-ergonomics' ); ?></a>
+			</h2>
+
+			<div id="wsergo-panel-country" class="wsergo-scope-panel">
 
 			<div class="notice notice-info inline" style="margin:12px 0;padding:12px;">
-				<p style="margin:.4em 0;"><strong><?php esc_html_e( 'Как это работает', 'worldstat-ergonomics' ); ?></strong></p>
-				<p style="margin:.4em 0;">
-					<strong><?php esc_html_e( 'Текущий режим:', 'worldstat-ergonomics' ); ?></strong>
-					<?php echo esc_html( $calc_mode_label ); ?>
-					— <a href="<?php echo esc_url( admin_url( 'admin.php?page=wsergo-countries' ) ); ?>"><?php esc_html_e( 'переключить режим', 'worldstat-ergonomics' ); ?></a>
+				<p style="margin:.4em 0;"><strong><?php esc_html_e( 'Вкладки', 'worldstat-ergonomics' ); ?></strong>
+					— <a href="#tab-data" class="wsergo-tab-deep-link"><?php esc_html_e( 'перейти к «Данные»', 'worldstat-ergonomics' ); ?></a>
 				</p>
 				<ol style="margin:.5em 0 .5em 1.2em;list-style:decimal;padding-left:1em;">
-					<li><?php esc_html_e( 'Измерения — доли влияния шести осей на сводный балл E (после сохранения сумма весов приводится к 1).', 'worldstat-ergonomics' ); ?></li>
-					<li><?php esc_html_e( 'Показатели — шкалы для сырых величин (шум, ширина дорог…); на объекте вводятся числа в единицах, плагин переводит их в 0–100 по min/max.', 'worldstat-ergonomics' ); ?></li>
-					<li><?php esc_html_e( 'Данные города — при отсутствии кварталов можно подставить значения из записи города (импорт Cities) в те же показатели.', 'worldstat-ergonomics' ); ?></li>
-					<li><?php esc_html_e( 'Формула E — по умолчанию не нужна: используется взвешенное среднее по шести осям. Своя формула (DSL) — по желанию для экспертов.', 'worldstat-ergonomics' ); ?></li>
-					<li><?php esc_html_e( 'Индекс города: если есть кварталы с оценкой — считается по ним; иначе — по данным города и этой карте сопоставления.', 'worldstat-ergonomics' ); ?></li>
+					<li><?php esc_html_e( 'Измерения — веса шести измерений среды (здание/район) и справочные показатели; это не веса макро-осей страны.', 'worldstat-ergonomics' ); ?></li>
+					<li><?php esc_html_e( 'Данные — версия методики, признаки k-means, привязка CSV к рядам для страны.', 'worldstat-ergonomics' ); ?></li>
+					<li><?php esc_html_e( 'Формула — макро-оси страны (F, Cm, H…), их веса в страновом E из CSV, модели и DSL для объекта.', 'worldstat-ergonomics' ); ?></li>
 				</ol>
 			</div>
 
-			<h2 class="nav-tab-wrapper wsergo-tab-nav">
-				<a href="#tab-overview" class="nav-tab nav-tab-active" data-tab="tab-overview"><?php esc_html_e( 'Обзор', 'worldstat-ergonomics' ); ?></a>
-				<a href="#tab-weights" class="nav-tab" data-tab="tab-weights"><?php esc_html_e( 'Измерения', 'worldstat-ergonomics' ); ?></a>
-				<a href="#tab-indicators" class="nav-tab" data-tab="tab-indicators"><?php esc_html_e( 'Показатели', 'worldstat-ergonomics' ); ?></a>
-				<a href="#tab-city-import" class="nav-tab" data-tab="tab-city-import"><?php esc_html_e( 'Данные города', 'worldstat-ergonomics' ); ?></a>
-				<a href="#tab-models" class="nav-tab" data-tab="tab-models"><?php esc_html_e( 'Формула E', 'worldstat-ergonomics' ); ?></a>
-				<a href="#tab-coeff" class="nav-tab" data-tab="tab-coeff"><?php esc_html_e( 'Коэффициенты', 'worldstat-ergonomics' ); ?></a>
-				<a href="#tab-agg" class="nav-tab" data-tab="tab-agg"><?php esc_html_e( 'Агрегация', 'worldstat-ergonomics' ); ?></a>
+			<h2 class="nav-tab-wrapper wsergo-country-inner-nav" style="margin-top:8px;">
+				<a href="#tab-measure" class="nav-tab nav-tab-active" data-tab="tab-measure"><?php esc_html_e( 'Измерения', 'worldstat-ergonomics' ); ?></a>
+				<a href="#tab-data" class="nav-tab" data-tab="tab-data"><?php esc_html_e( 'Данные', 'worldstat-ergonomics' ); ?></a>
+				<a href="#tab-formula" class="nav-tab" data-tab="tab-formula"><?php esc_html_e( 'Формула', 'worldstat-ergonomics' ); ?></a>
 			</h2>
 
-			<form method="post" action="options.php">
+			<form class="wsergo-settings-form" method="post" action="options.php">
 				<?php settings_fields( 'wsergo_settings' ); ?>
 
-				<div id="tab-overview" class="wsergo-tab-panel">
-					<p class="description">
-						<?php esc_html_e( 'Иерархия объектов: помещение → здание → квартал → связь с городом → регион (поле города в Cities) → страна.', 'worldstat-ergonomics' ); ?>
-					</p>
-					<p class="description">
-						<?php esc_html_e( 'Активная «модель» с пустой формулой — это не отдельный режим из одного пункта: просто классическое взвешенное среднее по шести осям (веса — вкладка «Измерения»), учитываются только оси с баллом > 0.', 'worldstat-ergonomics' ); ?>
-					</p>
-					<p class="description">
-						<?php esc_html_e( 'Если в городе появятся кварталы с оценкой, индекс города на карте и в отчётах считается по кварталам. Если кварталов нет — включите расчёт по данным импорта на странице «Города» (меню World Statistics) и задайте сопоставление на вкладке «Данные города».', 'worldstat-ergonomics' ); ?>
-					</p>
-					<table class="form-table">
-						<tr>
-							<th scope="row"><label for="wsergo_methodology_version"><?php esc_html_e( 'Версия методики', 'worldstat-ergonomics' ); ?></label></th>
-							<td>
-								<input name="wsergo_methodology_version" id="wsergo_methodology_version" type="text" value="<?php echo esc_attr( get_option( 'wsergo_methodology_version', '1.2' ) ); ?>" class="regular-text" />
-							</td>
-						</tr>
-						<tr>
-							<th scope="row"><?php esc_html_e( 'Активная модель расчёта E', 'worldstat-ergonomics' ); ?></th>
-							<td>
-								<select name="<?php echo esc_attr( WSErgo_Settings::OPTION_ACTIVE_MODEL ); ?>">
-									<?php foreach ( $models as $m ) : ?>
-										<option value="<?php echo esc_attr( $m['id'] ); ?>" <?php selected( $active_id, $m['id'] ); ?>><?php echo esc_html( $m['name'] ); ?></option>
-									<?php endforeach; ?>
-								</select>
-								<?php if ( $active_model ) : ?>
-									<p class="description"><?php echo esc_html( $active_model['leaf_formula'] !== '' ? $active_model['leaf_formula'] : __( 'Пустая формула: взвешенное среднее по шести осям (вкладка «Измерения»). Это режим по умолчанию.', 'worldstat-ergonomics' ) ); ?></p>
-								<?php endif; ?>
-							</td>
-						</tr>
-					</table>
-				</div>
-
-				<div id="tab-weights" class="wsergo-tab-panel" style="display:none">
-					<p class="description"><?php esc_html_e( 'Здесь задаётся относительная важность каждой из шести осей (функциональность, безопасность, …) для сводного индекса E. Числа можно вводить в любых пропорциях (например 3 и 1), после сохранения они приводятся к сумме 1. Те же величины доступны в DSL как w_functionality, w_safety и т.д.', 'worldstat-ergonomics' ); ?></p>
-					<p class="description"><?php esc_html_e( 'Ось с нулевым весом в формуле не участвует; оси без введённого балла (0) в классическом расчёте тоже не входят в знаменатель.', 'worldstat-ergonomics' ); ?></p>
+				<div id="tab-measure" class="wsergo-tab-panel">
+					<h2><?php esc_html_e( 'Измерения', 'worldstat-ergonomics' ); ?></h2>
+					<p class="description"><?php esc_html_e( 'Доли шести измерений среды (функциональность, безопасность, комфорт, обитаемость, освояемость, управляемость) при сводном E по объекту; после сохранения сумма приводится к 1. В DSL это веса w_functionality, w_safety и т.д. — не путать с весами макро-осей страны (F, Cm, H, A, S, Ct) на вкладке «Формула».', 'worldstat-ergonomics' ); ?></p>
 					<table class="form-table">
 						<?php foreach ( WSErgo_Model::DIMENSION_KEYS as $dim ) : ?>
 						<tr>
@@ -1116,22 +1285,9 @@ class WSErgo_Admin {
 						</tr>
 						<?php endforeach; ?>
 					</table>
-				</div>
-
-				<div id="tab-indicators" class="wsergo-tab-panel" style="display:none">
-					<p class="description">
-						<?php esc_html_e( 'Шаг 1. Задайте показатель: латинский ID (например street_noise), название, уровень из шести, единицы, минимум и максимум «хорошего» диапазона, направление (чем больше тем лучше или наоборот), относительный вес между показателями одного уровня.', 'worldstat-ergonomics' ); ?>
-					</p>
-					<p class="description">
-						<?php esc_html_e( 'Шаг 2. На карточке квартала/здания/помещения введите сырое число — плагин переведёт его в балл 0–100 и усреднит с другими показателями этого уровня по весам.', 'worldstat-ergonomics' ); ?>
-					</p>
-					<p class="description">
-						<strong><?php esc_html_e( 'Пример:', 'worldstat-ergonomics' ); ?></strong>
-						<?php esc_html_e( 'ID noise_db, уровень «Безопасность», ед. дБ, мин 30 макс 70, «лучше меньше», вес 1 — тогда 40 дБ даст высокий балл, 65 дБ — низкий.', 'worldstat-ergonomics' ); ?>
-					</p>
-					<p class="description">
-						<?php esc_html_e( 'Веса внутри одного уровня после сохранения нормализуются к сумме 1. Пустой ID строки отбрасывается.', 'worldstat-ergonomics' ); ?>
-					</p>
+					<hr />
+					<h3><?php esc_html_e( 'Показатели', 'worldstat-ergonomics' ); ?></h3>
+					<p class="description"><?php esc_html_e( 'Шкалы сырых величин и веса показателей по осям (справочно для расчётов и отчётов).', 'worldstat-ergonomics' ); ?></p>
 					<p>
 						<button type="button" class="button" id="wsergo-add-indicator-row"><?php esc_html_e( 'Добавить показатель', 'worldstat-ergonomics' ); ?></button>
 					</p>
@@ -1213,82 +1369,233 @@ class WSErgo_Admin {
 					</table>
 				</div>
 
-				<div id="tab-city-import" class="wsergo-tab-panel" style="display:none">
+				<div id="tab-data" class="wsergo-tab-panel" style="display:none">
+					<h2><?php esc_html_e( 'Данные', 'worldstat-ergonomics' ); ?></h2>
+					<p class="description"><?php esc_html_e( 'Источники и параметры для странового индекса по макроданным CSV. Поддерживаются «длинные» файлы (country_code, year, value) и широкие (country_code, year и несколько числовых столбцов — demographics, urban_infra, environment и т.д.). Для базового треугольника населения/площади по-прежнему нужны ряды population_total и surface_area_sqkm либо совместимые long-CSV; из широких файлов подтягиваются плотность, доля городского населения, лес и прочие признаки.', 'worldstat-ergonomics' ); ?></p>
+					<?php if ( defined( 'WSERGO_URL' ) ) : ?>
 					<p class="description">
-						<?php esc_html_e( 'Когда кварталов с оценкой ещё нет, для каждого города (wsp_city) можно подставить значения из импорта WorldStat Cities в те же показатели, что на вкладке «Показатели». Включите общую опцию на странице «Города» (меню World Statistics) и задайте строки сопоставления ниже.', 'worldstat-ergonomics' ); ?>
+						<a href="<?php echo esc_url( WSERGO_URL . 'data/ergo-wide-csv-reference.txt' ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Справка по столбцам широких CSV (открывается в новой вкладке)', 'worldstat-ergonomics' ); ?></a>
 					</p>
+					<?php endif; ?>
+					<table class="form-table">
+						<tr>
+							<th scope="row"><label for="wsergo_methodology_version"><?php esc_html_e( 'Версия методики', 'worldstat-ergonomics' ); ?></label></th>
+							<td>
+								<input name="wsergo_methodology_version" id="wsergo_methodology_version" type="text" value="<?php echo esc_attr( get_option( 'wsergo_methodology_version', '1.2' ) ); ?>" class="regular-text" />
+								<p class="description"><?php esc_html_e( 'Условный номер или метка редакции методики (например 1.2, 2025‑A). Указывается в подписях к индексу и отчётах, чтобы было видно, по какой версии формул и наборов данных получены значения. Повышайте версию при изменении формул, весов осей или состава CSV.', 'worldstat-ergonomics' ); ?></p>
+							</td>
+						</tr>
+					</table>
+					<hr />
+					<h3><?php esc_html_e( 'Признаки для k-means (макро)', 'worldstat-ergonomics' ); ?></h3>
+					<p class="description"><?php esc_html_e( 'Отметьте признаки, входящие в вектор кластеризации. Нужно не меньше двух; иначе используется встроенный набор плагина. Снимите ненужные или добавьте новые из списка.', 'worldstat-ergonomics' ); ?></p>
+					<div style="max-height:220px;overflow:auto;border:1px solid #c3c4c7;padding:10px;background:#fff;">
+						<?php foreach ( $signals_ui as $sig ) : ?>
+							<label style="display:block;margin:.25em 0;">
+								<input type="checkbox" name="<?php echo esc_attr( WSErgo_Settings::OPTION_MACRO_CLUSTER_FEATURES ); ?>[]" value="<?php echo esc_attr( $sig ); ?>" <?php checked( in_array( $sig, $cf_for_checkboxes, true ), true ); ?> />
+								<code><?php echo esc_html( $sig ); ?></code>
+							</label>
+						<?php endforeach; ?>
+					</div>
+					<table class="form-table" role="presentation">
+						<tr>
+							<th scope="row">
+								<label for="wsergo_macro_extra_signals"><?php esc_html_e( 'Дополнительные ключи признаков (wide)', 'worldstat-ergonomics' ); ?></label>
+							</th>
+							<td>
+								<textarea id="wsergo_macro_extra_signals" name="<?php echo esc_attr( WSErgo_Settings::OPTION_MACRO_EXTRA_SIGNALS_TEXT ); ?>" rows="6" class="large-text code"><?php echo esc_textarea( $macro_extra_signals_text ); ?></textarea>
+								<p class="description">
+									<?php esc_html_e( 'По одному латинскому ключу в строке (как после нормализации заголовка столбца wide-CSV). Ключи появляются в списке чекбоксов выше и в формулах осей; до 50 строк. Если имя столбца в файле не совпадает с ключом, сопоставление по-прежнему задаётся в коде: wide_csv_column_to_signal.', 'worldstat-ergonomics' ); ?>
+								</p>
+							</td>
+						</tr>
+					</table>
+					<hr />
+					<h3><?php esc_html_e( 'Режим расчёта по стране и CSV', 'worldstat-ergonomics' ); ?></h3>
 					<p class="description">
-						<?php esc_html_e( 'После изменения сопоставления снова сохраните блок эргономики на странице «Города» (пересчёт для всех городов) либо пересохраните отдельные города — при включённой опции индекс обновится автоматически.', 'worldstat-ergonomics' ); ?>
+						<?php esc_html_e( 'Индекс страны строится по страновым рядам из CSV платформы, опорному году и кластеризации k-means.', 'worldstat-ergonomics' ); ?>
 					</p>
-					<?php if ( empty( $source_choices ) ) : ?>
-						<p class="description"><?php esc_html_e( 'Справочник полей города недоступен (плагин Cities не активен).', 'worldstat-ergonomics' ); ?></p>
+					<table class="form-table">
+						<tr>
+							<th scope="row"><?php esc_html_e( 'Источник индекса', 'worldstat-ergonomics' ); ?></th>
+							<td>
+								<input type="hidden" name="<?php echo esc_attr( WSErgo_Settings::OPTION_COUNTRY_INDEX_SOURCE ); ?>" value="macro_datasets" />
+								<p class="description"><?php esc_html_e( 'Используются только макроданные (CSV в разделе «Данные CSV» платформы).', 'worldstat-ergonomics' ); ?></p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="wsergo_macro_reference_year"><?php esc_html_e( 'Опорный год (макро)', 'worldstat-ergonomics' ); ?></label></th>
+							<td>
+								<input type="number" id="wsergo_macro_reference_year" name="<?php echo esc_attr( WSErgo_Settings::OPTION_MACRO_REFERENCE_YEAR ); ?>" value="<?php echo esc_attr( (string) $macro_year ); ?>" class="small-text" min="1900" max="2100" step="1" />
+								<p class="description"><?php esc_html_e( 'Год для выборки значений country_code + year в CSV (если в файле есть столбец года).', 'worldstat-ergonomics' ); ?></p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="wsergo_macro_k_clusters"><?php esc_html_e( 'Число кластеров k-means (макро)', 'worldstat-ergonomics' ); ?></label></th>
+							<td>
+								<input type="number" id="wsergo_macro_k_clusters" name="<?php echo esc_attr( WSErgo_Settings::OPTION_MACRO_K_CLUSTERS ); ?>" value="<?php echo esc_attr( (string) $macro_k ); ?>" class="small-text" min="2" max="12" step="1" />
+								<p class="description"><?php esc_html_e( 'Нормализация min–max выполняется внутри кластера стран.', 'worldstat-ergonomics' ); ?></p>
+							</td>
+						</tr>
+					</table>
+					<hr />
+					<h3><?php esc_html_e( 'Привязка базовых рядов к CSV из базы', 'worldstat-ergonomics' ); ?></h3>
+					<p class="description">
+						<?php esc_html_e( 'Список из девяти показателей фиксированный: это «слоты» движка макро (население, площадь, плотность, дороги и т.д.). Он не меняется от набора файлов — остальные столбцы ваших wide-CSV попадают в расчёт как признаки (см. формулы осей и k-means). Если для слота нет отдельного long-файла, оставьте «авто» или привяжите файл с long-колонкой value; при только wide-демографии без населения/площади плагин может построить условный треугольник по плотности (см. предупреждение на странице страны).', 'worldstat-ergonomics' ); ?>
+					</p>
+					<?php if ( empty( $csv_files ) ) : ?>
+						<p class="description"><?php esc_html_e( 'Нет записей CSV в базе или таблица не создана — загрузите данные в World Statistics → Данные CSV.', 'worldstat-ergonomics' ); ?></p>
 					<?php else : ?>
-					<p>
-						<button type="button" class="button" id="wsergo-add-city-map-row"><?php esc_html_e( 'Добавить сопоставление', 'worldstat-ergonomics' ); ?></button>
-					</p>
-					<table class="widefat striped" id="wsergo-city-map-table">
+					<table class="widefat striped">
 						<thead>
 							<tr>
-								<th><?php esc_html_e( 'Поле данных города', 'worldstat-ergonomics' ); ?></th>
-								<th><?php esc_html_e( 'ID показателя эргономики', 'worldstat-ergonomics' ); ?></th>
+								<th><?php esc_html_e( 'Показатель', 'worldstat-ergonomics' ); ?></th>
+								<th><?php esc_html_e( 'Файл из БД (wsp_csv_datasets)', 'worldstat-ergonomics' ); ?></th>
 							</tr>
 						</thead>
-						<tbody id="wsergo-city-map-rows">
+						<tbody>
 							<?php
-							$cm_rows = $city_field_map;
-							if ( empty( $cm_rows ) ) {
-								$cm_rows[] = [ 'source' => '', 'indicator_id' => '' ];
-							}
-							foreach ( array_values( $cm_rows ) as $cidx => $crow ) :
-								?>
+							if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+								foreach ( WSErgo_Country_Macro_Calculator::bindable_standard_metric_keys() as $mk ) :
+									$bound = isset( $macro_bindings[ $mk ] ) ? (int) $macro_bindings[ $mk ] : 0;
+									$lab   = $metric_labels_ru[ $mk ] ?? $mk;
+									?>
 							<tr>
 								<td>
-									<select name="wsergo_city_field_map[<?php echo esc_attr( (string) $cidx ); ?>][source]" class="widefat">
-										<option value=""><?php esc_html_e( '— выберите —', 'worldstat-ergonomics' ); ?></option>
-										<?php foreach ( $source_choices as $sval => $slab ) : ?>
-											<option value="<?php echo esc_attr( $sval ); ?>" <?php selected( isset( $crow['source'] ) ? (string) $crow['source'] : '', $sval ); ?>><?php echo esc_html( $slab ); ?></option>
-										<?php endforeach; ?>
-									</select>
+									<strong><?php echo esc_html( $lab ); ?></strong>
+									<br /><span class="description"><?php esc_html_e( 'Техимя в данных:', 'worldstat-ergonomics' ); ?> <code><?php echo esc_html( $mk ); ?></code></span>
 								</td>
 								<td>
-									<select name="wsergo_city_field_map[<?php echo esc_attr( (string) $cidx ); ?>][indicator_id]" class="widefat">
-										<option value=""><?php esc_html_e( '— выберите —', 'worldstat-ergonomics' ); ?></option>
-										<?php foreach ( WSErgo_Indicators::get_definitions() as $idef ) : ?>
-											<option value="<?php echo esc_attr( $idef['id'] ); ?>" <?php selected( isset( $crow['indicator_id'] ) ? (string) $crow['indicator_id'] : '', $idef['id'] ); ?>><?php echo esc_html( $idef['label'] . ' (' . $idef['id'] . ')' ); ?></option>
+									<select name="<?php echo esc_attr( WSErgo_Settings::OPTION_MACRO_CSV_BINDINGS ); ?>[<?php echo esc_attr( $mk ); ?>]" class="widefat">
+										<option value="0"><?php esc_html_e( '— авто по имени файла —', 'worldstat-ergonomics' ); ?></option>
+										<?php foreach ( $csv_files as $frow ) : ?>
+											<?php
+											$kid = (string) ( $frow['dataset_kind'] ?? '' );
+											if ( class_exists( 'WorldStat_Uploaded_Csv' ) && ! WorldStat_Uploaded_Csv::is_calculation_source_kind( $kid ) ) {
+												continue;
+											}
+											$fid = (int) ( $frow['id'] ?? 0 );
+											$fn  = (string) ( $frow['name'] ?? '' );
+											?>
+										<option value="<?php echo esc_attr( (string) $fid ); ?>" <?php selected( $bound, $fid ); ?>><?php echo esc_html( '#' . $fid . ' — ' . $fn . ' (' . $kid . ')' ); ?></option>
 										<?php endforeach; ?>
 									</select>
 								</td>
 							</tr>
-							<?php endforeach; ?>
-							<tr class="wsergo-city-map-template" style="display:none">
-								<td>
-									<select name="wsergo_city_field_map[][source]" class="widefat">
-										<option value=""><?php esc_html_e( '— выберите —', 'worldstat-ergonomics' ); ?></option>
-										<?php foreach ( $source_choices as $sval => $slab ) : ?>
-											<option value="<?php echo esc_attr( $sval ); ?>"><?php echo esc_html( $slab ); ?></option>
-										<?php endforeach; ?>
-									</select>
-								</td>
-								<td>
-									<select name="wsergo_city_field_map[][indicator_id]" class="widefat">
-										<option value=""><?php esc_html_e( '— выберите —', 'worldstat-ergonomics' ); ?></option>
-										<?php foreach ( WSErgo_Indicators::get_definitions() as $idef ) : ?>
-											<option value="<?php echo esc_attr( $idef['id'] ); ?>"><?php echo esc_html( $idef['label'] . ' (' . $idef['id'] . ')' ); ?></option>
-										<?php endforeach; ?>
-									</select>
-								</td>
-							</tr>
+									<?php
+								endforeach;
+							}
+							?>
 						</tbody>
 					</table>
 					<?php endif; ?>
 				</div>
 
-				<div id="tab-models" class="wsergo-tab-panel" style="display:none">
+				<div id="tab-formula" class="wsergo-tab-panel" style="display:none">
+					<h2><?php esc_html_e( 'Формула', 'worldstat-ergonomics' ); ?></h2>
+					<h3><?php esc_html_e( 'Макро: слагаемые по осям F, Cm, H, A, S, Ct', 'worldstat-ergonomics' ); ?></h3>
+					<p class="description"><?php esc_html_e( 'Каждая ось — взвешенная сумма нормализованных признаков (0–1). «Инверсия» подставляет (1 − значение). Пустые строки при сохранении отбрасываются; если для оси не осталось ни одного слагаемого, подставляется встроенная методика. На одну ось можно задать до 50 слагаемых; если не хватает строк — нажмите «Добавить слагаемое».', 'worldstat-ergonomics' ); ?></p>
+					<?php
+					$macro_opt = WSErgo_Settings::OPTION_MACRO_AXIS_TERMS;
+					foreach ( $macro_axis_labels as $ax_key => $ax_lab ) :
+						$rows_ax    = isset( $macro_axis_resolved[ $ax_key ] ) ? $macro_axis_resolved[ $ax_key ] : [];
+						$filled     = is_array( $rows_ax ) ? count( $rows_ax ) : 0;
+						$term_slots = min( 35, max( 12, $filled + 5 ) );
+						?>
+						<h4><?php echo esc_html( $ax_lab ); ?></h4>
+						<p><button type="button" class="button wsergo-add-macro-term-row" data-axis="<?php echo esc_attr( $ax_key ); ?>"><?php esc_html_e( 'Добавить слагаемое', 'worldstat-ergonomics' ); ?></button></p>
+						<table class="widefat striped">
+							<thead>
+								<tr>
+									<th><?php esc_html_e( 'Признак', 'worldstat-ergonomics' ); ?></th>
+									<th><?php esc_html_e( 'Вес', 'worldstat-ergonomics' ); ?></th>
+									<th><?php esc_html_e( 'Инверсия 1−x', 'worldstat-ergonomics' ); ?></th>
+								</tr>
+							</thead>
+							<tbody class="wsergo-macro-axis-tbody" data-axis="<?php echo esc_attr( $ax_key ); ?>">
+								<tr class="wsergo-macro-term-template" style="display:none;" aria-hidden="true">
+									<td>
+										<select name="<?php echo esc_attr( $macro_opt ); ?>[<?php echo esc_attr( $ax_key ); ?>][999999][signal]" class="widefat" disabled>
+											<option value=""><?php esc_html_e( '—', 'worldstat-ergonomics' ); ?></option>
+											<?php foreach ( $signals_ui as $sig ) : ?>
+												<option value="<?php echo esc_attr( $sig ); ?>"><?php echo esc_html( $sig ); ?></option>
+											<?php endforeach; ?>
+										</select>
+									</td>
+									<td><input type="text" class="small-text" name="<?php echo esc_attr( $macro_opt ); ?>[<?php echo esc_attr( $ax_key ); ?>][999999][weight]" value="" disabled /></td>
+									<td><label><input type="checkbox" name="<?php echo esc_attr( $macro_opt ); ?>[<?php echo esc_attr( $ax_key ); ?>][999999][invert]" value="1" disabled /></label></td>
+								</tr>
+								<?php
+								for ( $ri = 0; $ri < $term_slots; $ri++ ) :
+									$rowt = isset( $rows_ax[ $ri ] ) ? $rows_ax[ $ri ] : [ 'signal' => '', 'weight' => '', 'invert' => false ];
+									?>
+								<tr>
+									<td>
+										<select name="<?php echo esc_attr( $macro_opt ); ?>[<?php echo esc_attr( $ax_key ); ?>][<?php echo (int) $ri; ?>][signal]" class="widefat">
+											<option value=""><?php esc_html_e( '—', 'worldstat-ergonomics' ); ?></option>
+											<?php foreach ( $signals_ui as $sig ) : ?>
+												<option value="<?php echo esc_attr( $sig ); ?>" <?php selected( (string) ( $rowt['signal'] ?? '' ), $sig ); ?>><?php echo esc_html( $sig ); ?></option>
+											<?php endforeach; ?>
+										</select>
+									</td>
+									<td><input type="text" class="small-text" name="<?php echo esc_attr( $macro_opt ); ?>[<?php echo esc_attr( $ax_key ); ?>][<?php echo (int) $ri; ?>][weight]" value="<?php echo esc_attr( isset( $rowt['weight'] ) ? (string) $rowt['weight'] : '' ); ?>" /></td>
+									<td><label><input type="checkbox" name="<?php echo esc_attr( $macro_opt ); ?>[<?php echo esc_attr( $ax_key ); ?>][<?php echo (int) $ri; ?>][invert]" value="1" <?php checked( ! empty( $rowt['invert'] ) ); ?> /></label></td>
+								</tr>
+								<?php endfor; ?>
+							</tbody>
+						</table>
+					<?php endforeach; ?>
+					<hr />
+					<h3><?php esc_html_e( 'Веса шести макро-осей в страновом E (из CSV)', 'worldstat-ergonomics' ); ?></h3>
+					<p class="description"><?php esc_html_e( 'Только для индекса страны по макроданным (оси F, Cm, H, A, S, Ct). Веса на вкладке «Измерения» задают другой расчёт — сводный E по шести измерениям среды объекта (здание, квартал и т.д.).', 'worldstat-ergonomics' ); ?></p>
+					<table class="form-table">
+						<?php
+						$axis_labels = [ 'F' => 'F', 'Cm' => 'Cm', 'H' => 'H', 'A' => 'A', 'S' => 'S', 'Ct' => 'Ct' ];
+						foreach ( $axis_labels as $ax => $short ) :
+							?>
+						<tr>
+							<th scope="row"><label for="wsergo_macro_e_<?php echo esc_attr( $ax ); ?>"><?php echo esc_html( $short ); ?></label></th>
+							<td>
+								<input type="text" class="small-text" id="wsergo_macro_e_<?php echo esc_attr( $ax ); ?>" name="<?php echo esc_attr( WSErgo_Settings::OPTION_MACRO_E_AXIS_WEIGHTS ); ?>[<?php echo esc_attr( $ax ); ?>]" value="<?php echo esc_attr( (string) ( $macro_e_w[ $ax ] ?? '' ) ); ?>" inputmode="decimal" />
+							</td>
+						</tr>
+						<?php endforeach; ?>
+					</table>
+					<hr />
+					<h3><?php esc_html_e( 'Активная модель расчёта E', 'worldstat-ergonomics' ); ?></h3>
+					<table class="form-table">
+						<tr>
+							<th scope="row"><?php esc_html_e( 'Модель', 'worldstat-ergonomics' ); ?></th>
+							<td>
+								<select name="<?php echo esc_attr( WSErgo_Settings::OPTION_ACTIVE_MODEL ); ?>">
+									<?php foreach ( $models as $m ) : ?>
+										<option value="<?php echo esc_attr( $m['id'] ); ?>" <?php selected( $active_id, $m['id'] ); ?>><?php echo esc_html( $m['name'] ); ?></option>
+									<?php endforeach; ?>
+								</select>
+								<?php if ( $active_model ) : ?>
+									<p class="description"><?php echo esc_html( $active_model['leaf_formula'] !== '' ? $active_model['leaf_formula'] : __( 'Пустая формула: взвешенное среднее по шести осям (вкладка «Измерения»).', 'worldstat-ergonomics' ) ); ?></p>
+								<?php endif; ?>
+							</td>
+						</tr>
+					</table>
+					<hr />
+					<h3><?php esc_html_e( 'Коэффициенты k_* (DSL)', 'worldstat-ergonomics' ); ?></h3>
+					<p class="description"><?php esc_html_e( 'Глобальные множители в пользовательской формуле сводного E по объекту (k_default и др.). Это не веса осей и не веса измерений — отдельная шкала для DSL.', 'worldstat-ergonomics' ); ?></p>
+					<table class="form-table">
+						<?php foreach ( $coeffs as $k => $v ) : ?>
+						<tr>
+							<th scope="row"><label><?php echo esc_html( $k ); ?></label></th>
+							<td><input type="text" name="wsergo_coefficients[<?php echo esc_attr( $k ); ?>]" value="<?php echo esc_attr( (string) $v ); ?>" class="small-text" /></td>
+						</tr>
+						<?php endforeach; ?>
+					</table>
+					<hr />
+					<h3><?php esc_html_e( 'Модели и DSL', 'worldstat-ergonomics' ); ?></h3>
 					<p class="description">
 						<?php esc_html_e( 'Простой режим: оставьте формулу пустой — сводный E считается как взвешенное среднее по шести осям. Режим «своя формула» (DSL) позволяет умножать оси на коэффициенты k_*, использовать нормализованные показатели i_* и веса w_*.', 'worldstat-ergonomics' ); ?>
 					</p>
 					<p class="description">
-						<?php esc_html_e( 'Переменные: F, S, C, L, O, M — баллы осей 0–100; w_* — веса из вкладки «Измерения»; i_* — нормализованные показатели; k_* — глобальные множители (вкладка «Коэффициенты»).', 'worldstat-ergonomics' ); ?>
+						<?php esc_html_e( 'Переменные: F, S, C, L, O, M — баллы осей 0–100; w_* — веса из вкладки «Измерения»; i_* — нормализованные показатели; k_* — глобальные множители (таблица «Коэффициенты k_*» выше на этой вкладке).', 'worldstat-ergonomics' ); ?>
 					</p>
 					<p class="description">
 						<?php esc_html_e( 'Допустимые идентификаторы:', 'worldstat-ergonomics' ); ?>
@@ -1305,7 +1612,7 @@ class WSErgo_Admin {
 							<tr>
 								<th><?php esc_html_e( 'ID', 'worldstat-ergonomics' ); ?></th>
 								<th><?php esc_html_e( 'Название', 'worldstat-ergonomics' ); ?></th>
-								<th><?php esc_html_e( 'Формула сводного E для листа (пусто = классика)', 'worldstat-ergonomics' ); ?></th>
+								<th><?php esc_html_e( 'Формула сводного E (пусто = классика)', 'worldstat-ergonomics' ); ?></th>
 							</tr>
 						</thead>
 						<tbody>
@@ -1323,77 +1630,25 @@ class WSErgo_Admin {
 					<p class="description"><?php esc_html_e( 'Чтобы добавить модель, сохраните страницу и отредактируйте массив в БД или добавьте строку через фильтр wsergo_default_models.', 'worldstat-ergonomics' ); ?></p>
 				</div>
 
-				<div id="tab-coeff" class="wsergo-tab-panel" style="display:none">
-					<p class="description"><?php esc_html_e( 'Ключи k_* — имена множителей в формуле DSL (например k_default, k_climate). Значение подставляется в выражение как переменная. На отдельной записи квартала/здания коэффициенты можно переопределить JSON в метабоксе «Переопределение коэффициентов».', 'worldstat-ergonomics' ); ?></p>
-					<table class="form-table">
-						<?php foreach ( $coeffs as $k => $v ) : ?>
-						<tr>
-							<th scope="row"><label><?php echo esc_html( $k ); ?></label></th>
-							<td><input type="text" name="wsergo_coefficients[<?php echo esc_attr( $k ); ?>]" value="<?php echo esc_attr( (string) $v ); ?>" class="small-text" /></td>
-						</tr>
-						<?php endforeach; ?>
-					</table>
-					<p class="description"><?php esc_html_e( 'Новые ключи можно добавить вручную в опции или расширить форму кодом; имя должно начинаться с k_.', 'worldstat-ergonomics' ); ?></p>
-				</div>
-
-				<div id="tab-agg" class="wsergo-tab-panel" style="display:none">
-					<p class="description"><?php esc_html_e( 'Правила объединения дочерних объектов при расчёте родителя. Используйте, когда в иерархии несколько помещений, зданий или кварталов.', 'worldstat-ergonomics' ); ?></p>
-					<table class="form-table">
-						<tr>
-							<th><?php esc_html_e( 'Помещения → здание', 'worldstat-ergonomics' ); ?></th>
-							<td>
-								<select name="wsergo_aggregation[room_to_building]">
-									<option value="mean" <?php selected( $agg['room_to_building'], 'mean' ); ?>><?php esc_html_e( 'Среднее', 'worldstat-ergonomics' ); ?></option>
-									<option value="weighted_area" <?php selected( $agg['room_to_building'], 'weighted_area' ); ?>><?php esc_html_e( 'По площади', 'worldstat-ergonomics' ); ?></option>
-									<option value="median" <?php selected( $agg['room_to_building'], 'median' ); ?>><?php esc_html_e( 'Медиана', 'worldstat-ergonomics' ); ?></option>
-								</select>
-								<p class="description"><?php esc_html_e( 'Среднее — равный вес помещений; по площади — крупные помещения сильнее влияют; медиана — устойчиво к выбросам.', 'worldstat-ergonomics' ); ?></p>
-							</td>
-						</tr>
-						<tr>
-							<th><?php esc_html_e( 'Вес зданий / придомовых в квартале', 'worldstat-ergonomics' ); ?></th>
-							<td>
-								<input type="text" name="wsergo_aggregation[w_building_in_district]" value="<?php echo esc_attr( (string) $agg['w_building_in_district'] ); ?>" class="small-text" />
-								/
-								<input type="text" name="wsergo_aggregation[w_yard_in_district]" value="<?php echo esc_attr( (string) $agg['w_yard_in_district'] ); ?>" class="small-text" />
-								<p class="description"><?php esc_html_e( 'Две доли (после сохранения нормализуются к сумме 1), как смешивать средний индекс по зданиям и по придомовым участкам в одном квартале.', 'worldstat-ergonomics' ); ?></p>
-							</td>
-						</tr>
-						<tr>
-							<th><?php esc_html_e( 'Кварталы → город', 'worldstat-ergonomics' ); ?></th>
-							<td>
-								<select name="wsergo_aggregation[district_to_city]">
-									<option value="mean" <?php selected( $agg['district_to_city'], 'mean' ); ?>><?php esc_html_e( 'Среднее по кварталам', 'worldstat-ergonomics' ); ?></option>
-									<option value="buildings_weighted" <?php selected( $agg['district_to_city'], 'buildings_weighted' ); ?>><?php esc_html_e( 'Взвешено по числу зданий и участков', 'worldstat-ergonomics' ); ?></option>
-								</select>
-								<p class="description"><?php esc_html_e( 'Среднее — все кварталы равны; взвешено — квартал с большим числом зданий/дворов вносит больший вклад в индекс города.', 'worldstat-ergonomics' ); ?></p>
-							</td>
-						</tr>
-						<tr>
-							<th><?php esc_html_e( 'Города → регион', 'worldstat-ergonomics' ); ?></th>
-							<td>
-								<select name="wsergo_aggregation[city_to_region]">
-									<option value="pop_weighted" <?php selected( $agg['city_to_region'], 'pop_weighted' ); ?>><?php esc_html_e( 'По населению T3', 'worldstat-ergonomics' ); ?></option>
-									<option value="mean" <?php selected( $agg['city_to_region'], 'mean' ); ?>><?php esc_html_e( 'Среднее', 'worldstat-ergonomics' ); ?></option>
-								</select>
-								<p class="description"><?php esc_html_e( 'По населению — крупные города сильнее влияют на региональный показатель.', 'worldstat-ergonomics' ); ?></p>
-							</td>
-						</tr>
-						<tr>
-							<th><?php esc_html_e( 'Регионы → страна (справочно)', 'worldstat-ergonomics' ); ?></th>
-							<td>
-								<select name="wsergo_aggregation[region_to_country]">
-									<option value="pop_weighted" <?php selected( $agg['region_to_country'], 'pop_weighted' ); ?>><?php esc_html_e( 'По населению', 'worldstat-ergonomics' ); ?></option>
-									<option value="mean" <?php selected( $agg['region_to_country'], 'mean' ); ?>><?php esc_html_e( 'Среднее по регионам', 'worldstat-ergonomics' ); ?></option>
-								</select>
-								<p class="description"><?php esc_html_e( 'Если в «Эргономика стран» выбрана агрегация по городам и режим через регионы — это правило объединения регионов в страну. При макроданных по CSV страновой индекс городов не использует эту цепочку.', 'worldstat-ergonomics' ); ?></p>
-							</td>
-						</tr>
-					</table>
-				</div>
-
 				<?php submit_button(); ?>
 			</form>
+
+			</div><!-- #wsergo-panel-country -->
+
+			<div id="wsergo-panel-city" class="wsergo-scope-panel" style="display:none;">
+				<div class="notice notice-info inline" style="margin:12px 0;padding:12px;">
+					<p style="margin:.4em 0;"><strong><?php esc_html_e( 'Эргономичность города', 'worldstat-ergonomics' ); ?></strong></p>
+					<p style="margin:.4em 0;"><?php esc_html_e( 'Заглушка: отдельный модуль настроек для города будет добавлен позже.', 'worldstat-ergonomics' ); ?></p>
+				</div>
+			</div>
+
+			<div id="wsergo-panel-territory" class="wsergo-scope-panel" style="display:none;">
+				<div class="notice notice-info inline" style="margin:12px 0;padding:12px;">
+					<p style="margin:.4em 0;"><strong><?php esc_html_e( 'Эргономичность территории', 'worldstat-ergonomics' ); ?></strong></p>
+					<p style="margin:.4em 0;"><?php esc_html_e( 'Заглушка: настройки для территории будут добавлены отдельно.', 'worldstat-ergonomics' ); ?></p>
+				</div>
+			</div>
+
 		</div>
 		<?php
 	}

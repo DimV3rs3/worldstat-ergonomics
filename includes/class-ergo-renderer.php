@@ -400,7 +400,8 @@ class WSErgo_Renderer {
 		$sdg_abs = ! empty( $diag['sdg_row_absent'] );
 		$cl_imp  = isset( $diag['cluster_median_imputed_features'] ) && is_array( $diag['cluster_median_imputed_features'] ) ? $diag['cluster_median_imputed_features'] : array();
 		$axis_u  = isset( $diag['axis_weight_used'] ) && is_array( $diag['axis_weight_used'] ) ? $diag['axis_weight_used'] : array();
-		$idx_bad = ! empty( $diag['index_unavailable'] );
+		$idx_bad    = ! empty( $diag['index_unavailable'] );
+		$dimless_tri = ! empty( $diag['triangle_dimensionless_baseline'] );
 
 		?>
 		<div class="wsp-ergo-wrapper" style="margin-top:1.25rem;" id="<?php echo esc_attr( $uid ); ?>">
@@ -428,7 +429,7 @@ class WSErgo_Renderer {
 				</p>
 			<?php endif; ?>
 
-			<?php if ( ! empty( $missing ) || ! empty( $derived ) || $sdg_abs || ! empty( $cl_imp ) || ! empty( $axis_u ) || $idx_bad ) : ?>
+			<?php if ( ! empty( $missing ) || ! empty( $derived ) || $sdg_abs || ! empty( $cl_imp ) || ! empty( $axis_u ) || $idx_bad || $dimless_tri ) : ?>
 				<div class="notice notice-info" style="margin:0 0 12px;padding:10px 12px;border-left:4px solid #2271b1;background:#f0f6fc;">
 					<?php if ( $idx_bad && ( null === $scores || ! isset( $scores['E'] ) ) ) : ?>
 						<p style="margin:0 0 .5em;"><strong><?php esc_html_e( 'Сводный индекс E не выведен', 'worldstat-ergonomics' ); ?></strong> — <?php esc_html_e( 'недостаточно конечных значений по осям после нормализации.', 'worldstat-ergonomics' ); ?></p>
@@ -451,6 +452,12 @@ class WSErgo_Renderer {
 							}
 							echo esc_html( implode( '; ', $parts ) );
 							?>
+						</p>
+					<?php endif; ?>
+					<?php if ( $dimless_tri ) : ?>
+						<p style="margin:0 0 .5em;">
+							<strong><?php esc_html_e( 'Базовый треугольник по плотности', 'worldstat-ergonomics' ); ?></strong>
+							<?php esc_html_e( '— в CSV нет населения и площади территории; для расчёта подставлен условный масштаб с той же плотностью. Индекс и кластеры осмысленны для сравнения стран по форме профиля (SDG, инфраструктура, демография в wide); абсолютные «на душу» и доли застройки от площади страны к реальным км² не привязаны, пока не загрузите реальные population_total и surface_area_sqkm.', 'worldstat-ergonomics' ); ?>
 						</p>
 					<?php endif; ?>
 					<?php if ( $sdg_abs ) : ?>
@@ -527,7 +534,7 @@ class WSErgo_Renderer {
 			<?php endif; ?>
 
 			<?php if ( null === $raw ) : ?>
-				<p class="wsp-muted"><?php esc_html_e( 'Нет строки признаков для этой страны в загруженных макроданных (проверьте ISO3 в CSV и тип набора «страна» / «индикаторы для расчётов»).', 'worldstat-ergonomics' ); ?></p>
+				<p class="wsp-muted"><?php esc_html_e( 'Нет строки признаков для этой страны: в макроданных за выбранный опорный год не удалось собрать обязательный треугольник «население — площадь территории — плотность» (все три числа должны быть > 0, часть можно восстановить из двух других). Либо код в CSV не распознан как ISO3 (нужны три латинские буквы в country_code/iso3 или известный ISO2 при наличии страны в каталоге платформы). Проверьте также год в файлах, настройку «Опорный год (макро)» и тип набора CSV: «показатели страны», «индикаторы для расчётов» или «объединённо».', 'worldstat-ergonomics' ); ?></p>
 			<?php else : ?>
 				<div class="wsergo-macro-detail-views">
 					<div class="wsergo-macro-view-tabs" role="tablist" aria-label="<?php esc_attr_e( 'Режим отображения сырых показателей', 'worldstat-ergonomics' ); ?>">
