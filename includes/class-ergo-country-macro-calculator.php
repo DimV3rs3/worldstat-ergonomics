@@ -16,7 +16,7 @@ class WSErgo_Country_Macro_Calculator {
 	private const TRANSIENT_KEY = 'wsergo_macro_scores_bundle_v11';
 
 	/** Инкремент при изменении логики расчёта — сбрасывает устаревший transient без смены CSV. */
-	private const SCORE_BUNDLE_LOGIC = 20;
+	private const SCORE_BUNDLE_LOGIC = 21;
 
 	/** @var array<string, string>|null ISO2 => ISO3 из data/countries.json платформы */
 	private static $iso2_to_iso3_file_cache = null;
@@ -1111,7 +1111,7 @@ class WSErgo_Country_Macro_Calculator {
 				}
 				self::wide_panel_seed_standard_metrics( $parsed, $standard );
 			} else {
-				$key = self::metric_key_for_standard_csv_row( $id, $name );
+				$key = self::metric_key_for_standard_csv_row( $id, $name, $body );
 				if ( $key === null ) {
 					continue;
 				}
@@ -1160,8 +1160,31 @@ class WSErgo_Country_Macro_Calculator {
 		$has_year = isset( $h['year'] ) || isset( $h['yr'] ) || isset( $h['timeperiod'] ) || isset( $h['time_period'] );
 		if ( $has_country && $has_year ) {
 			$has_long_value = isset( $h['value'] ) || isset( $h['obs_value'] ) || isset( $h['indicator_value'] ) || isset( $h['val'] );
-			$skip           = array( 'country_code' => true, 'year' => true, 'iso3' => true, 'iso' => true, 'cca3' => true, 'country' => true, 'country_name' => true );
-			$data_cols      = 0;
+			$skip           = array(
+				'country_code'   => true,
+				'year'           => true,
+				'iso3'           => true,
+				'iso'            => true,
+				'cca3'           => true,
+				'country'        => true,
+				'country_name'   => true,
+				'coutry_code'    => true,
+				'countrycode'    => true,
+				'time'           => true,
+				'timeperiod'     => true,
+				'time_period'    => true,
+				'yr'             => true,
+				'value'          => true,
+				'obs_value'      => true,
+				'indicator_value' => true,
+				'val'            => true,
+				'footnote'       => true,
+				'footnotes'      => true,
+				'source'         => true,
+				'datasource'     => true,
+				'lastupdatedate' => true,
+			);
+			$data_cols = 0;
 			foreach ( array_keys( $h ) as $k ) {
 				if ( ! isset( $skip[ $k ] ) ) {
 					++$data_cols;
@@ -1170,8 +1193,47 @@ class WSErgo_Country_Macro_Calculator {
 			if ( ! $has_long_value && $data_cols >= 1 ) {
 				return 'wide_panel';
 			}
+			// Есть колонка value, но одновременно несколько числовых показателей — широкая панель (новые выгрузки).
+			if ( $has_long_value && $data_cols >= 2 ) {
+				return 'wide_panel';
+			}
+			// Сигнатура новых country-панелей без колонки value.
+			if ( self::csv_header_suggests_wide_country_panel( $h ) ) {
+				return 'wide_panel';
+			}
 		}
 		return 'standard';
+	}
+
+	/**
+	 * Заголовки в духе demographics.csv / environment.csv — всегда обрабатывать как wide_panel.
+	 *
+	 * @param array<string, true> $h
+	 */
+	private static function csv_header_suggests_wide_country_panel( array $h ): bool {
+		$markers = array(
+			'pop_total__psn',
+			'pop_density__psn_per_km_sq',
+			'pop_urban__psn',
+			'land_area__km_sq',
+			'forest_area__ptc',
+			'railway_length__km',
+			'road_length__km',
+			'urban_pop_share__ptc',
+			'largest_city_pop__psn',
+			'energy_use_per_cap__kgoe',
+			'gdp_per_energy__ppp_per_kgoe',
+			'access_electricity__ptc',
+			'internet_users__ptc',
+			'military_exp__ptc_gdp',
+			'tax_revenue__ptc_gdp',
+		);
+		foreach ( $markers as $m ) {
+			if ( isset( $h[ $m ] ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -1419,7 +1481,13 @@ class WSErgo_Country_Macro_Calculator {
 	 * @param array<string, array<string, array<int, float>>> $standard
 	 */
 	private static function wide_panel_seed_metric_if_absent( array &$standard, string $metric_key, string $iso3, int $year, float $val ): void {
-		if ( $val <= 0 || ! is_finite( $val ) ) {
+		if ( ! is_finite( $val ) ) {
+			return;
+		}
+		if ( $val < 0 ) {
+			return;
+		}
+		if ( $val <= 0 && 'urban_share_percent' !== $metric_key ) {
 			return;
 		}
 		if ( isset( $standard[ $metric_key ][ $iso3 ][ $year ] ) ) {
@@ -1496,6 +1564,16 @@ class WSErgo_Country_Macro_Calculator {
 					self::wide_panel_seed_metric_if_absent( $standard, 'urban_share_percent', $iso3, $y, (float) $cols['urban_share'] * 100.0 );
 				} elseif ( isset( $cols['urban_pop_share__ptc'] ) && is_finite( (float) $cols['urban_pop_share__ptc'] ) ) {
 					self::wide_panel_seed_metric_if_absent( $standard, 'urban_share_percent', $iso3, $y, (float) $cols['urban_pop_share__ptc'] );
+				} elseif (
+					isset( $cols['pop_urban__psn'], $cols['pop_total__psn'] )
+					&& is_finite( (float) $cols['pop_total__psn'] )
+					&& is_finite( (float) $cols['pop_urban__psn'] )
+				) {
+					$pt = (float) $cols['pop_total__psn'];
+					$pu = (float) $cols['pop_urban__psn'];
+					if ( $pt > 0.0 && $pu >= 0.0 ) {
+						self::wide_panel_seed_metric_if_absent( $standard, 'urban_share_percent', $iso3, $y, 100.0 * $pu / $pt );
+					}
 				}
 				if ( isset( $cols['forest_share'] ) && is_finite( (float) $cols['forest_share'] ) ) {
 					self::wide_panel_seed_metric_if_absent( $standard, 'forest_percentage', $iso3, $y, (float) $cols['forest_share'] * 100.0 );
@@ -1525,9 +1603,9 @@ class WSErgo_Country_Macro_Calculator {
 	}
 
 	/**
-	 * Явная привязка id CSV в БД к ключу ряда (иначе — по имени файла).
+	 * Явная привязка id CSV в БД к ключу ряда; иначе эвристика по заголовку/столбцам; затем по имени файла.
 	 */
-	private static function metric_key_for_standard_csv_row( int $file_id, string $filename ): ?string {
+	private static function metric_key_for_standard_csv_row( int $file_id, string $filename, string $body = '' ): ?string {
 		if ( $file_id > 0 && class_exists( 'WSErgo_Settings' ) ) {
 			$bindings = WSErgo_Settings::get_macro_csv_bindings();
 			foreach ( $bindings as $metric_key => $bound_id ) {
@@ -1539,7 +1617,268 @@ class WSErgo_Country_Macro_Calculator {
 				}
 			}
 		}
+		if ( $body !== '' ) {
+			$from_body = self::infer_standard_metric_key_from_csv_body( $body );
+			if ( $from_body !== null ) {
+				return $from_body;
+			}
+		}
 		return self::metric_key_from_filename( $filename );
+	}
+
+	/**
+	 * Long-CSV: определить единственный базовый ряд по коду/названию индикатора или по одному «смысловому» столбцу в заголовке.
+	 */
+	private static function infer_standard_metric_key_from_csv_body( string $body ): ?string {
+		$code = self::csv_sample_dominant_column_value(
+			$body,
+			array(
+				'indicator_code',
+				'series_code',
+				'series_id',
+				'indicator_id',
+				'wb_series_code',
+				'itemcode',
+				'variable_code',
+				'indicatorcode',
+			)
+		);
+		if ( $code !== null && $code !== '' ) {
+			$mk = self::world_bank_style_series_code_to_metric_key( strtoupper( trim( $code ) ) );
+			if ( $mk !== null ) {
+				return $mk;
+			}
+		}
+		$name = self::csv_sample_dominant_column_value(
+			$body,
+			array(
+				'indicator_name',
+				'series_name',
+				'variable_name',
+				'indicator',
+			)
+		);
+		if ( $name !== null && $name !== '' ) {
+			$mk = self::indicator_label_text_to_metric_key( $name );
+			if ( $mk !== null ) {
+				return $mk;
+			}
+		}
+		return self::infer_standard_metric_key_from_header_columns_only( $body );
+	}
+
+	/**
+	 * Если в заголовке ровно один распознаваемый столбец показателя (при long-колонке value) — привязать к нему.
+	 */
+	private static function infer_standard_metric_key_from_header_columns_only( string $body ): ?string {
+		$h = self::csv_header_normalized_keys( $body );
+		if ( empty( $h ) ) {
+			return null;
+		}
+		$has_value = isset( $h['value'] ) || isset( $h['obs_value'] ) || isset( $h['indicator_value'] ) || isset( $h['val'] );
+		if ( ! $has_value ) {
+			return null;
+		}
+		$map   = self::standard_metric_header_synonym_to_key();
+		$found = array();
+		foreach ( array_keys( $h ) as $col ) {
+			if ( isset( $map[ $col ] ) ) {
+				$found[ $map[ $col ] ] = true;
+			}
+		}
+		if ( count( $found ) === 1 ) {
+			foreach ( array_keys( $found ) as $mk ) {
+				return $mk;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * @return array<string, string> нормализованное имя столбца → ключ STANDARD_METRIC_KEYS
+	 */
+	private static function standard_metric_header_synonym_to_key(): array {
+		static $out = null;
+		if ( is_array( $out ) ) {
+			return $out;
+		}
+		$out = array();
+		foreach ( self::STANDARD_METRIC_KEYS as $k ) {
+			$out[ $k ] = $k;
+		}
+		$groups = array(
+			'population_total'               => array(
+				'pop_total__psn',
+				'pop_tot',
+				'total_pop',
+				'population',
+				'sp_pop_totl',
+				'sppoptotl',
+			),
+			'surface_area_sqkm'              => array(
+				'land_area__km_sq',
+				'land_area_sqkm',
+				'land_area',
+				'surface_area',
+				'ag_land_sqkm',
+				'country_area',
+				'areasqkm',
+			),
+			'population_density_per_km2'   => array(
+				'pop_density__psn_per_km_sq',
+				'pop_dens',
+				'pop_density',
+				'en_pop_dnst',
+			),
+			'urban_share_percent'            => array(
+				'urban_pop_share__ptc',
+				'urban_share',
+				'sp_urb_totl_in_zs',
+				'urbanization',
+			),
+			'urban_land_area_sqkm'           => array(
+				'urban_land',
+				'sp_urb_land',
+			),
+			'forest_percentage'              => array(
+				'forest_area__ptc',
+				'forest_share',
+				'ag_lnd_frst_zs',
+			),
+			'largest_city_population'        => array(
+				'largest_city_pop__psn',
+				'en_urb_lcty',
+				'largest_city_pop',
+			),
+			'railway_length'                 => array(
+				'railway_length__km',
+				'is_rrs_totl_km',
+				'rail_km',
+			),
+			'road_length'                    => array(
+				'road_length__km',
+				'is_rod_totl_km',
+				'road_km',
+			),
+		);
+		foreach ( $groups as $metric => $synonyms ) {
+			foreach ( $synonyms as $s ) {
+				$out[ $s ] = $metric;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Частые коды рядов WDI / совместимых выгрузок → ключ макро-ряда.
+	 */
+	private static function world_bank_style_series_code_to_metric_key( string $code ): ?string {
+		static $map = null;
+		if ( null === $map ) {
+			$map = array(
+				'SP.POP.TOTL'       => 'population_total',
+				'AG.LND.TOTL.K2'    => 'surface_area_sqkm',
+				'EN.POP.DNST'       => 'population_density_per_km2',
+				'SP.URB.TOTL.IN.ZS' => 'urban_share_percent',
+				'AG.LND.FRST.ZS'    => 'forest_percentage',
+				'EN.URB.LCTY'       => 'largest_city_population',
+				'IS.RRS.TOTL.KM'    => 'railway_length',
+				'IS.ROD.TOTL.KM'    => 'road_length',
+				'SP.URB.LAND'       => 'urban_land_area_sqkm',
+			);
+		}
+		return $map[ $code ] ?? null;
+	}
+
+	/**
+	 * Текстовое название индикатора (англ.) → ключ ряда.
+	 */
+	private static function indicator_label_text_to_metric_key( string $label ): ?string {
+		$t = strtolower( $label );
+		if ( strpos( $t, 'largest' ) !== false && strpos( $t, 'cit' ) !== false ) {
+			return 'largest_city_population';
+		}
+		if ( strpos( $t, 'population' ) !== false && strpos( $t, 'dens' ) !== false ) {
+			return 'population_density_per_km2';
+		}
+		if ( strpos( $t, 'population' ) !== false && strpos( $t, 'total' ) !== false ) {
+			return 'population_total';
+		}
+		if ( strpos( $t, 'land area' ) !== false || strpos( $t, 'surface area' ) !== false || ( strpos( $t, 'area' ) !== false && strpos( $t, 'sq' ) !== false ) ) {
+			return 'surface_area_sqkm';
+		}
+		if ( strpos( $t, 'urban' ) !== false && strpos( $t, 'pop' ) !== false && strpos( $t, '%' ) !== false ) {
+			return 'urban_share_percent';
+		}
+		if ( strpos( $t, 'forest' ) !== false && ( strpos( $t, '%' ) !== false || strpos( $t, 'cover' ) !== false ) ) {
+			return 'forest_percentage';
+		}
+		if ( strpos( $t, 'urban' ) !== false && strpos( $t, 'land' ) !== false ) {
+			return 'urban_land_area_sqkm';
+		}
+		if ( strpos( $t, 'rail' ) !== false ) {
+			return 'railway_length';
+		}
+		if ( strpos( $t, 'road' ) !== false && strpos( $t, 'length' ) !== false ) {
+			return 'road_length';
+		}
+		return null;
+	}
+
+	/**
+	 * До max_lines строк данных: уникальные значения в первом найденном столбце из $candidates; при ровно одном — вернуть его.
+	 *
+	 * @param list<string> $candidates нормализованные имена столбцов
+	 */
+	private static function csv_sample_dominant_column_value( string $body, array $candidates, int $max_lines = 120 ): ?string {
+		$lines = preg_split( "/\r\n|\n|\r/", $body );
+		$h       = array();
+		$started = false;
+		$idx     = -1;
+		$seen    = array();
+		$n       = 0;
+		foreach ( $lines as $line ) {
+			$line = trim( (string) $line );
+			if ( $line === '' ) {
+				continue;
+			}
+			$row = str_getcsv( $line );
+			if ( ! $started ) {
+				foreach ( $row as $ci => $colname ) {
+					$h[ $ci ] = self::normalize_csv_header_key( (string) $colname );
+				}
+				foreach ( $h as $i => $hn ) {
+					if ( in_array( $hn, $candidates, true ) ) {
+						$idx = (int) $i;
+						break;
+					}
+				}
+				if ( $idx < 0 ) {
+					return null;
+				}
+				$started = true;
+				continue;
+			}
+			$cell = trim( (string) ( $row[ $idx ] ?? '' ) );
+			if ( $cell === '' ) {
+				continue;
+			}
+			$seen[ $cell ] = true;
+			if ( count( $seen ) > 1 ) {
+				return null;
+			}
+			++$n;
+			if ( $n >= $max_lines ) {
+				break;
+			}
+		}
+		if ( count( $seen ) !== 1 ) {
+			return null;
+		}
+		foreach ( array_keys( $seen ) as $one ) {
+			return $one;
+		}
+		return null;
 	}
 
 	private static function metric_key_from_filename( string $filename ): ?string {
@@ -1554,6 +1893,7 @@ class WSErgo_Country_Macro_Calculator {
 			'surface_area'               => 'surface_area_sqkm',
 			'area'                       => 'surface_area_sqkm',
 			'land_area'                  => 'surface_area_sqkm',
+			'territory'                  => 'surface_area_sqkm',
 			'pop_density'                => 'population_density_per_km2',
 			'density'                    => 'population_density_per_km2',
 			'urbanization'               => 'urban_share_percent',
@@ -1579,10 +1919,28 @@ class WSErgo_Country_Macro_Calculator {
 		if ( strpos( $stem, 'population' ) !== false && strpos( $stem, 'total' ) !== false ) {
 			return 'population_total';
 		}
+		if ( strpos( $stem, 'pop' ) !== false && strpos( $stem, 'total' ) !== false && strpos( $stem, 'urban' ) === false ) {
+			return 'population_total';
+		}
+		if ( strpos( $stem, 'pop' ) !== false && strpos( $stem, 'dens' ) !== false ) {
+			return 'population_density_per_km2';
+		}
+		if ( strpos( $stem, 'urban' ) !== false && strpos( $stem, 'share' ) !== false ) {
+			return 'urban_share_percent';
+		}
+		if ( strpos( $stem, 'urban' ) !== false && strpos( $stem, 'land' ) !== false ) {
+			return 'urban_land_area_sqkm';
+		}
 		if ( strpos( $stem, 'road' ) !== false && strpos( $stem, 'length' ) !== false ) {
 			return 'road_length';
 		}
 		if ( strpos( $stem, 'rail' ) !== false && strpos( $stem, 'length' ) !== false ) {
+			return 'railway_length';
+		}
+		if ( strpos( $stem, 'road' ) !== false && strpos( $stem, 'km' ) !== false ) {
+			return 'road_length';
+		}
+		if ( strpos( $stem, 'rail' ) !== false && strpos( $stem, 'km' ) !== false ) {
 			return 'railway_length';
 		}
 		return null;
