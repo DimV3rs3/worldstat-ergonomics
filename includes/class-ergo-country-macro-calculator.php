@@ -12,6 +12,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class WSErgo_Country_Macro_Calculator {
 
+	/** Один результат get_full_bundle() на HTTP-запрос (рейтинг/карта иначе многократно дергают transient/память). */
+	private static ?array $runtime_full_bundle = null;
+
 	/** Новый ключ — старый кэш без diag/raw_rows больше не читается (избегает фаталов при несовпадении формата). */
 	private const TRANSIENT_KEY = 'wsergo_macro_scores_bundle_v11';
 
@@ -97,6 +100,7 @@ class WSErgo_Country_Macro_Calculator {
 	public static function flush_cache(): void {
 		delete_transient( self::TRANSIENT_KEY );
 		delete_transient( 'wsergo_macro_scores_bundle' );
+		self::$runtime_full_bundle = null;
 	}
 
 	/**
@@ -271,6 +275,9 @@ class WSErgo_Country_Macro_Calculator {
 	 * @return array{y:int,r:int,lv:int,scores:array,diag:array<string,array<string,mixed>>,raw_rows:array<string,array<string,float>>}
 	 */
 	public static function get_full_bundle(): array {
+		if ( self::$runtime_full_bundle !== null ) {
+			return self::$runtime_full_bundle;
+		}
 		$defaults = array(
 			'y'         => 0,
 			'r'         => 0,
@@ -298,7 +305,7 @@ class WSErgo_Country_Macro_Calculator {
 			&& is_array( $bund['diag'] )
 			&& is_array( $bund['raw_rows'] )
 		) {
-			return array(
+			self::$runtime_full_bundle = array(
 				'y'        => (int) $bund['y'],
 				'r'        => (int) $bund['r'],
 				'lv'       => (int) $bund['lv'],
@@ -307,6 +314,7 @@ class WSErgo_Country_Macro_Calculator {
 				'diag'     => $bund['diag'],
 				'raw_rows' => $bund['raw_rows'],
 			);
+			return self::$runtime_full_bundle;
 		}
 		$full = self::compute_full_bundle( $year );
 		if ( ! is_array( $full ) ) {
@@ -320,7 +328,8 @@ class WSErgo_Country_Macro_Calculator {
 		$full['diag']     = isset( $full['diag'] ) && is_array( $full['diag'] ) ? $full['diag'] : array();
 		$full['raw_rows'] = isset( $full['raw_rows'] ) && is_array( $full['raw_rows'] ) ? $full['raw_rows'] : array();
 		set_transient( self::TRANSIENT_KEY, $full, HOUR_IN_SECONDS * 6 );
-		return $full;
+		self::$runtime_full_bundle = $full;
+		return self::$runtime_full_bundle;
 	}
 
 	/**
@@ -391,8 +400,68 @@ class WSErgo_Country_Macro_Calculator {
 		return 0.0;
 	}
 
+	/**
+	 * Макроиндекс E для списка ISO2 за один проход по сводке (рейтинги без N× декодирования transient).
+	 *
+	 * @param list<string> $iso2_codes
+	 * @return array<string,float> ключ — ISO2 в верхнем регистре
+	 */
+	public static function get_bulk_macro_indices_for_iso2( array $iso2_codes ): array {
+		if ( empty( $iso2_codes ) || ! class_exists( 'WorldStat_Country_CPT' ) ) {
+			return array();
+		}
+		if ( class_exists( 'WSErgo_Settings' ) && WSErgo_Settings::get_country_index_source() !== 'macro_datasets' ) {
+			return array();
+		}
+		$all = self::get_all_scores();
+		$out = array();
+		if ( empty( $all ) ) {
+			foreach ( $iso2_codes as $raw ) {
+				$iso2 = strtoupper( sanitize_text_field( (string) $raw ) );
+				if ( strlen( $iso2 ) !== 2 ) {
+					continue;
+				}
+				$out[ $iso2 ] = 0.0;
+			}
+			return $out;
+		}
+		foreach ( $iso2_codes as $raw ) {
+			$iso2 = strtoupper( sanitize_text_field( (string) $raw ) );
+			if ( strlen( $iso2 ) !== 2 ) {
+				continue;
+			}
+			$iso3 = self::iso2_to_iso3( $iso2 );
+			if ( $iso3 === '' ) {
+				$out[ $iso2 ] = 0.0;
+				continue;
+			}
+			$row = $all[ $iso3 ] ?? null;
+			if ( is_array( $row ) && isset( $row['E'] ) && is_finite( (float) $row['E'] ) ) {
+				$out[ $iso2 ] = round( (float) $row['E'], 2 );
+				continue;
+			}
+			$out[ $iso2 ] = 0.0;
+		}
+		return $out;
+	}
+
 	private static function iso2_to_iso3( string $iso2 ): string {
 		if ( ! class_exists( 'WorldStat_Country_CPT' ) ) {
+			return self::iso2_to_iso3_from_countries_json( $iso2 );
+		}
+		$iso2 = strtoupper( trim( $iso2 ) );
+		if ( strlen( $iso2 ) !== 2 || ! ctype_alpha( $iso2 ) ) {
+			return '';
+		}
+		$post_id = 0;
+		if ( method_exists( 'WorldStat_Country_CPT', 'get_post_id_by_code' ) ) {
+			$post_id = (int) WorldStat_Country_CPT::get_post_id_by_code( $iso2 );
+		}
+		if ( $post_id > 0 ) {
+			$iso3 = strtoupper( (string) get_post_meta( $post_id, 'wsp_iso_alpha3', true ) );
+			if ( strlen( $iso3 ) === 3 && ctype_alpha( $iso3 ) ) {
+				return $iso3;
+			}
 			return self::iso2_to_iso3_from_countries_json( $iso2 );
 		}
 		$post = WorldStat_Country_CPT::get_by_code( $iso2 );

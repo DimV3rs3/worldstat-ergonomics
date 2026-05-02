@@ -156,6 +156,30 @@ class WSErgo_Data {
 	}
 
 	/**
+	 * Рейтинги / массовые выборки: макрорежим — один проход по своду; режим городов — по стране через get_country_ergo_index.
+	 *
+	 * @param list<string> $iso2_list
+	 * @return array<string,float>
+	 */
+	public static function bulk_country_ergo_index_for_iso2_list( array $iso2_list ): array {
+		if ( empty( $iso2_list ) ) {
+			return array();
+		}
+		if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) && class_exists( 'WSErgo_Settings' ) && WSErgo_Settings::get_country_index_source() === 'macro_datasets' ) {
+			return WSErgo_Country_Macro_Calculator::get_bulk_macro_indices_for_iso2( $iso2_list );
+		}
+		$out = array();
+		foreach ( $iso2_list as $iso ) {
+			$iu = strtoupper( trim( (string) $iso ) );
+			if ( $iu === '' ) {
+				continue;
+			}
+			$out[ $iu ] = self::get_country_ergo_index( $iu );
+		}
+		return $out;
+	}
+
+	/**
 	 * Legacy: население-взвешенное среднее по городам страны (и вариант через регионы).
 	 */
 	private static function get_country_ergo_index_from_cities( string $iso2 ): float {
@@ -258,11 +282,22 @@ class WSErgo_Data {
 		if ( ! class_exists( 'WorldStat_Country_CPT' ) ) {
 			return [];
 		}
-		$map = WorldStat_Country_CPT::get_code_map();
+		$iso_list = array_keys( WorldStat_Country_CPT::get_code_map() );
+		if (
+			class_exists( 'WSErgo_Country_Macro_Calculator' )
+			&& class_exists( 'WSErgo_Settings' )
+			&& WSErgo_Settings::get_country_index_source() === 'macro_datasets'
+		) {
+			$bulk = WSErgo_Country_Macro_Calculator::get_bulk_macro_indices_for_iso2( $iso_list );
+			$out = [];
+			foreach ( $iso_list as $iso2 ) {
+				$out[ $iso2 ] = $bulk[ strtoupper( (string) $iso2 ) ] ?? 0.0;
+			}
+			return $out;
+		}
 		$out = [];
-		foreach ( array_keys( $map ) as $iso2 ) {
-			$v = self::get_country_ergo_index( $iso2 );
-			$out[ $iso2 ] = $v;
+		foreach ( $iso_list as $iso2 ) {
+			$out[ $iso2 ] = self::get_country_ergo_index( (string) $iso2 );
 		}
 		return $out;
 	}
