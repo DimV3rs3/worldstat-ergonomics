@@ -19,7 +19,7 @@ class WSErgo_Country_Macro_Calculator {
 	private const TRANSIENT_KEY = 'wsergo_macro_scores_bundle_v11';
 
 	/** Инкремент при изменении логики расчёта — сбрасывает устаревший transient без смены CSV. */
-	private const SCORE_BUNDLE_LOGIC = 22;
+	private const SCORE_BUNDLE_LOGIC = 23;
 
 	/** @var array<string, string>|null ISO2 => ISO3 из data/countries.json платформы */
 	private static $iso2_to_iso3_file_cache = null;
@@ -366,13 +366,29 @@ class WSErgo_Country_Macro_Calculator {
 		$scores = ( isset( $bundle['scores'] ) && is_array( $bundle['scores'] ) ) ? $bundle['scores'] : array();
 		$diags  = ( isset( $bundle['diag'] ) && is_array( $bundle['diag'] ) ) ? $bundle['diag'] : array();
 		$raws   = ( isset( $bundle['raw_rows'] ) && is_array( $bundle['raw_rows'] ) ) ? $bundle['raw_rows'] : array();
+		$axis_terms = class_exists( 'WSErgo_Settings' )
+			? WSErgo_Settings::get_macro_axis_terms_resolved()
+			: self::default_macro_axis_terms();
+		$e_w        = class_exists( 'WSErgo_Settings' )
+			? WSErgo_Settings::get_macro_e_axis_weights()
+			: array(
+				'F'  => 0.24,
+				'Cm' => 0.22,
+				'H'  => 0.18,
+				'A'  => 0.14,
+				'S'  => 0.12,
+				'Ct' => 0.10,
+			);
+
 		return array(
-			'iso3'        => $iso3,
-			'iso2'        => $iso2,
-			'year'        => $y,
-			'scores'      => isset( $scores[ $iso3 ] ) && is_array( $scores[ $iso3 ] ) ? $scores[ $iso3 ] : null,
-			'diagnostics' => isset( $diags[ $iso3 ] ) && is_array( $diags[ $iso3 ] ) ? $diags[ $iso3 ] : array(),
-			'raw_row'     => isset( $raws[ $iso3 ] ) && is_array( $raws[ $iso3 ] ) ? $raws[ $iso3 ] : null,
+			'iso3'         => $iso3,
+			'iso2'         => $iso2,
+			'year'         => $y,
+			'scores'       => isset( $scores[ $iso3 ] ) && is_array( $scores[ $iso3 ] ) ? $scores[ $iso3 ] : null,
+			'diagnostics'  => isset( $diags[ $iso3 ] ) && is_array( $diags[ $iso3 ] ) ? $diags[ $iso3 ] : array(),
+			'raw_row'      => isset( $raws[ $iso3 ] ) && is_array( $raws[ $iso3 ] ) ? $raws[ $iso3 ] : null,
+			'axis_terms'   => is_array( $axis_terms ) ? $axis_terms : array(),
+			'e_axis_weights' => is_array( $e_w ) ? $e_w : array(),
 		);
 	}
 
@@ -386,28 +402,165 @@ class WSErgo_Country_Macro_Calculator {
 	}
 
 	/**
+	 * Встроенные русские подписи для технических ключей (обзор страны, эргономика).
+	 * Переопределяются опцией админки и CSV «Переводы».
+	 *
 	 * @return array<string, string>
 	 */
 	public static function macro_signal_ru_defaults(): array {
-		return array();
+		static $cache = null;
+		if ( is_array( $cache ) ) {
+			return $cache;
+		}
+		$cache = array(
+			// Целые наборы CSV (имя файла / агрегат при импорте).
+			'demographics'     => __( 'Демография', 'worldstat-ergonomics' ),
+			'urban_infra'      => __( 'Городская инфраструктура и транспорт', 'worldstat-ergonomics' ),
+			'environment'      => __( 'Окружающая среда', 'worldstat-ergonomics' ),
+			'health_comfort'   => __( 'Здоровье и комфорт', 'worldstat-ergonomics' ),
+			'governance_sdg'   => __( 'Управление и цели устойчивого развития', 'worldstat-ergonomics' ),
+			'energy'           => __( 'Энергетика', 'worldstat-ergonomics' ),
+			// Базовые ряды страны (long CSV).
+			'population_total'              => __( 'Население', 'worldstat-ergonomics' ),
+			'surface_area_sqkm'             => __( 'Площадь территории, км²', 'worldstat-ergonomics' ),
+			'population_density_per_km2'    => __( 'Плотность населения на км²', 'worldstat-ergonomics' ),
+			'urban_share_percent'           => __( 'Доля городского населения, %', 'worldstat-ergonomics' ),
+			'urban_land_area_sqkm'          => __( 'Площадь урбанизированных территорий, км²', 'worldstat-ergonomics' ),
+			'forest_percentage'             => __( 'Леса, % территории', 'worldstat-ergonomics' ),
+			'largest_city_population'       => __( 'Население крупнейшего города', 'worldstat-ergonomics' ),
+			'railway_length'                => __( 'Железные дороги, км', 'worldstat-ergonomics' ),
+			'road_length'                   => __( 'Дороги, км', 'worldstat-ergonomics' ),
+			// Частые импорты / синонимы без двойного подчёркивания.
+			'co2_annual_tonnes'             => __( 'Годовые выбросы CO₂, тонн', 'worldstat-ergonomics' ),
+			'agri_land_ptc'                 => __( 'Сельхозугодья, % территории', 'worldstat-ergonomics' ),
+			'agri_land__ptc'                => __( 'Сельхозугодья, % территории', 'worldstat-ergonomics' ),
+			'access_clean_cooking_ptc'      => __( 'Доступ к чистой кухонной энергии, %', 'worldstat-ergonomics' ),
+			'access_clean_cooking__ptc'     => __( 'Доступ к чистой кухонной энергии, %', 'worldstat-ergonomics' ),
+			'access_drinking_water_basic_ptc' => __( 'Доступ к базовой питьевой воде, %', 'worldstat-ergonomics' ),
+			'access_drinking_water_basic__ptc' => __( 'Доступ к базовой питьевой воде, %', 'worldstat-ergonomics' ),
+			'access_electricity_ptc'        => __( 'Доступ к электричеству, %', 'worldstat-ergonomics' ),
+			'access_electricity__ptc'       => __( 'Доступ к электричеству, %', 'worldstat-ergonomics' ),
+			'access_sanitation_basic_ptc'   => __( 'Доступ к базовой санитарии, %', 'worldstat-ergonomics' ),
+			'access_sanitation_basic__ptc'  => __( 'Доступ к базовой санитарии, %', 'worldstat-ergonomics' ),
+			// Признаки макромодели (канонические ключи).
+			'transport_dens'                => __( 'Плотность транспортной сети', 'worldstat-ergonomics' ),
+			'air_departures__cnt'           => __( 'Взлёты и посадки воздушных судов, шт.', 'worldstat-ergonomics' ),
+			'air_passengers__psn'           => __( 'Авиапассажиры (перевезено)', 'worldstat-ergonomics' ),
+			'internet_users__ptc'           => __( 'Доля пользователей интернета, %', 'worldstat-ergonomics' ),
+			'broadband__per_100_psn'        => __( 'Широкополосный доступ на 100 человек', 'worldstat-ergonomics' ),
+			'mobile_subs__per_100_psn'      => __( 'Абоненты мобильной связи на 100 человек', 'worldstat-ergonomics' ),
+			'secure_servers__per_1m_psn'    => __( 'Защищённые интернет-серверы на 1 млн человек', 'worldstat-ergonomics' ),
+			'gdp_per_energy__ppp_per_kgoe'  => __( 'ВВП на единицу энергии (ППС), $/кг нефтяного экв.', 'worldstat-ergonomics' ),
+			'clean_elec_share__ptc'         => __( 'Доля «чистой» электроэнергии, %', 'worldstat-ergonomics' ),
+			'fossil_elec_share__ptc'        => __( 'Доля электроэнергии из ископаемого топлива, %', 'worldstat-ergonomics' ),
+			'energy_use_per_cap__kgoe'     => __( 'Энергопотребление на душу населения, кг нефтяного экв.', 'worldstat-ergonomics' ),
+			'pop_in_1m_aggl__ptc'           => __( 'Население в агломерациях >1 млн, %', 'worldstat-ergonomics' ),
+			'urban_share_01'                => __( 'Доля городского населения (доля 0–1)', 'worldstat-ergonomics' ),
+			'pop_density__psn_per_km_sq'    => __( 'Плотность населения, чел./км²', 'worldstat-ergonomics' ),
+			'pm25_exposure__mcg_per_m3'     => __( 'Воздействие PM2.5, мкг/м³', 'worldstat-ergonomics' ),
+			'co2_per_capita__tonnes_per_psn' => __( 'Выбросы CO₂ на душу населения, т/год', 'worldstat-ergonomics' ),
+			'renewable_energy__ptc'         => __( 'Возобновляемая энергия, %', 'worldstat-ergonomics' ),
+			'freshwater_renew_per_cap__m3'   => __( 'Внутренние возобновляемые водные ресурсы на душу, м³/год', 'worldstat-ergonomics' ),
+			'protected_terrestrial__ptc'    => __( 'Охраняемые наземные территории, %', 'worldstat-ergonomics' ),
+			'forest_cover_01'               => __( 'Лесной покров (доля 0–1)', 'worldstat-ergonomics' ),
+			'forest_per_capita_m2'          => __( 'Лесная площадь на душу населения, м²', 'worldstat-ergonomics' ),
+			'agri_pressure'                 => __( 'Нагрузка сельхозугодий (прокси)', 'worldstat-ergonomics' ),
+			'life_exp_total__years'         => __( 'Ожидаемая продолжительность жизни, лет', 'worldstat-ergonomics' ),
+			'health_system_capacity'        => __( 'Ёмкость системы здравоохранения (прокси)', 'worldstat-ergonomics' ),
+			'wASH_access_index'             => __( 'Индекс доступа к воде, санитарии и гигиене', 'worldstat-ergonomics' ),
+			'infect_and_stress_burden'      => __( 'Бремя инфекций и стресса (прокси)', 'worldstat-ergonomics' ),
+			'substance_burden'              => __( 'Бремя вредных веществ (прокси)', 'worldstat-ergonomics' ),
+			'fixed_phone__per_100_psn'      => __( 'Фиксированная телефония на 100 человек', 'worldstat-ergonomics' ),
+			'alcohol_total__liters_per_cap' => __( 'Потребление алкоголя на душу, л/год', 'worldstat-ergonomics' ),
+			'tobacco_adult__ptc'            => __( 'Доля курящих среди взрослых, %', 'worldstat-ergonomics' ),
+			'age_dependency_proxy'          => __( 'Зависимость населения (прокси)', 'worldstat-ergonomics' ),
+			'fertility_rate__births_per_woman' => __( 'Рождаемость, рожд. на женщину', 'worldstat-ergonomics' ),
+			'net_migration__psn'            => __( 'Чистая миграция, чел.', 'worldstat-ergonomics' ),
+			'big_city_ratio'                => __( 'Доля населения в крупных городах (прокси)', 'worldstat-ergonomics' ),
+			'urban_pop_growth__ptc'         => __( 'Рост городского населения, %', 'worldstat-ergonomics' ),
+			'digital_access_index'          => __( 'Индекс цифрового доступа', 'worldstat-ergonomics' ),
+			'debt_stress'                   => __( 'Долговая нагрузка (прокси)', 'worldstat-ergonomics' ),
+			'military_exp__ptc_gdp'         => __( 'Военные расходы, % ВВП', 'worldstat-ergonomics' ),
+			'women_parliament_seats__ptc'   => __( 'Доля женщин в парламенте, %', 'worldstat-ergonomics' ),
+			'fiscal_transparency_proxy'     => __( 'Фискальная прозрачность (прокси)', 'worldstat-ergonomics' ),
+			'tax_revenue__ptc_gdp'          => __( 'Налоговые поступления, % ВВП', 'worldstat-ergonomics' ),
+			'rent_fuels'                    => __( 'Доля ренты от топлива (прокси)', 'worldstat-ergonomics' ),
+			'net_oda_received__ptc_gni'     => __( 'Чистая ОПР, полученная, % ВНД', 'worldstat-ergonomics' ),
+		);
+		return $cache;
 	}
 
 	/**
-	 * Человекочитаемая подпись: только сохранённое пользователем для этого ключа; иначе прочерк.
+	 * Варианты ключа для словаря: canonical с «__» и импорт с одним «_» перед суффиксом единицы.
+	 *
+	 * @return list<string>
+	 */
+	public static function data_label_ru_candidate_keys( string $key ): array {
+		$key = sanitize_key( $key );
+		$out = array();
+		if ( $key !== '' ) {
+			$out[] = $key;
+		}
+		if ( strpos( $key, '__' ) === false ) {
+			$pairs = array(
+				'_psn_per_km_sq'    => '__psn_per_km_sq',
+				'_tonnes_per_psn'   => '__tonnes_per_psn',
+				'_liters_per_cap'   => '__liters_per_cap',
+				'_births_per_woman' => '__births_per_woman',
+				'_ppp_per_kgoe'     => '__ppp_per_kgoe',
+				'_per_kgoe'         => '__per_kgoe',
+				'_per_100_psn'      => '__per_100_psn',
+				'_per_1m_psn'       => '__per_1m_psn',
+				'_mcg_per_m3'       => '__mcg_per_m3',
+				'_ptc_gdp'          => '__ptc_gdp',
+				'_ptc_gni'          => '__ptc_gni',
+				'_ptc'              => '__ptc',
+				'_psn'              => '__psn',
+				'_cnt'              => '__cnt',
+			);
+			foreach ( $pairs as $single => $dbl ) {
+				$len = strlen( $single );
+				if ( strlen( $key ) > $len && substr( $key, -$len ) === $single ) {
+					$out[] = substr( $key, 0, -$len ) . $dbl;
+				}
+			}
+		} else {
+			$collapsed = str_replace( '__', '_', $key );
+			if ( $collapsed !== $key ) {
+				$out[] = $collapsed;
+			}
+		}
+		return array_values( array_unique( array_filter( $out ) ) );
+	}
+
+	/**
+	 * Человекочитаемая подпись: опции эргономики и импорт «Переводы» (world-statistics-platform); иначе читаемый ключ.
 	 */
 	public static function data_label_ru( string $key ): string {
 		$key = sanitize_key( $key );
 		if ( $key === '' ) {
 			return '—';
 		}
-		if ( ! class_exists( 'WSErgo_Settings' ) ) {
-			return '—';
+		$candidates = self::data_label_ru_candidate_keys( $key );
+		if ( class_exists( 'WSErgo_Settings' ) ) {
+			$custom = WSErgo_Settings::get_data_labels_ru();
+			foreach ( $candidates as $try_key ) {
+				if ( isset( $custom[ $try_key ] ) && $custom[ $try_key ] !== '' ) {
+					return $custom[ $try_key ];
+				}
+			}
 		}
-		$custom = WSErgo_Settings::get_data_labels_ru();
-		if ( isset( $custom[ $key ] ) && $custom[ $key ] !== '' ) {
-			return $custom[ $key ];
+		$defaults = self::macro_signal_ru_defaults();
+		foreach ( $candidates as $try_key ) {
+			if ( isset( $defaults[ $try_key ] ) && $defaults[ $try_key ] !== '' ) {
+				return $defaults[ $try_key ];
+			}
 		}
-		return '—';
+		$human = str_replace( '_', ' ', $key );
+		if ( function_exists( 'mb_convert_case' ) && preg_match( '/[a-z]/i', $human ) ) {
+			return mb_convert_case( $human, MB_CASE_TITLE, 'UTF-8' );
+		}
+		return $human !== '' ? ucwords( $human ) : '—';
 	}
 
 	/**
@@ -583,9 +736,24 @@ class WSErgo_Country_Macro_Calculator {
 	 *
 	 * @return list<string>
 	 */
+	/**
+	 * Формулы осей F–Ct из матрицы критериев и весов админки (fallback — встроенная методика).
+	 *
+	 * @return array<string, list<array{signal:string, invert:bool, weight:float}>>
+	 */
+	private static function get_effective_macro_axis_terms(): array {
+		if ( class_exists( 'WSErgo_Settings' ) ) {
+			$res = WSErgo_Settings::get_macro_axis_terms_resolved();
+			if ( is_array( $res ) ) {
+				return $res;
+			}
+		}
+		return self::default_macro_axis_terms();
+	}
+
 	private static function collect_normalization_columns(): array {
 		$cols = self::NORMALIZE_WITHIN_CLUSTER;
-		$axis_terms = self::default_macro_axis_terms();
+		$axis_terms = self::get_effective_macro_axis_terms();
 		foreach ( $axis_terms as $rows ) {
 			foreach ( $rows as $row ) {
 				$sig = sanitize_key( (string) ( $row['signal'] ?? '' ) );
@@ -732,7 +900,7 @@ class WSErgo_Country_Macro_Calculator {
 				return is_finite( $v ) ? $v : null;
 			};
 
-			$axis_terms = self::default_macro_axis_terms();
+			$axis_terms = self::get_effective_macro_axis_terms();
 
 			list( $f_vals, $f_w ) = self::macro_axis_vals_and_weights( $g, $axis_terms['F'] );
 			$F                   = self::compute_macro_axis_from_terms( $g, $axis_terms['F'] );
@@ -747,14 +915,16 @@ class WSErgo_Country_Macro_Calculator {
 			list( $ct_vals, $ct_w ) = self::macro_axis_vals_and_weights( $g, $axis_terms['Ct'] );
 			$Ct                    = self::compute_macro_axis_from_terms( $g, $axis_terms['Ct'] );
 
-			$ew = array(
-				'F'  => 0.24,
-				'Cm' => 0.22,
-				'H'  => 0.18,
-				'A'  => 0.14,
-				'S'  => 0.12,
-				'Ct' => 0.10,
-			);
+			$ew = class_exists( 'WSErgo_Settings' )
+				? WSErgo_Settings::get_macro_e_axis_weights()
+				: array(
+					'F'  => 0.24,
+					'Cm' => 0.22,
+					'H'  => 0.18,
+					'A'  => 0.14,
+					'S'  => 0.12,
+					'Ct' => 0.10,
+				);
 			$E = self::weighted_sum_finite(
 				array( $F, $Cm, $H, $A, $S, $Ct ),
 				array( $ew['F'], $ew['Cm'], $ew['H'], $ew['A'], $ew['S'], $ew['Ct'] )

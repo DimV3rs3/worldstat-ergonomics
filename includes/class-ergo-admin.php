@@ -351,7 +351,9 @@ class WSErgo_Admin {
 	 */
 	public function sanitize_macro_reference_year( $input ): int {
 		$y = is_numeric( $input ) ? (int) $input : 2022;
-		return max( 1900, min( 2100, $y ) );
+		$min = class_exists( 'WorldStat_Platform_Years' ) ? max( 1900, WorldStat_Platform_Years::min() ) : 1900;
+		$max = class_exists( 'WorldStat_Platform_Years' ) ? max( 2100, WorldStat_Platform_Years::max() ) : 2100;
+		return max( $min, min( $max, $y ) );
 	}
 
 	/**
@@ -1545,7 +1547,11 @@ class WSErgo_Admin {
 		</p>
 		<p class="wsergo-row">
 			<label><?php esc_html_e( 'Год постройки', 'worldstat-ergonomics' ); ?></label>
-			<input type="number" name="wsergo_year" value="<?php echo esc_attr( (string) get_post_meta( $post->ID, WSErgo_CPT::META_YEAR, true ) ); ?>" class="small-text" min="0" />
+			<?php
+			$wsergo_y_min = class_exists( 'WorldStat_Platform_Years' ) ? WorldStat_Platform_Years::min() : 1990;
+			$wsergo_y_max = class_exists( 'WorldStat_Platform_Years' ) ? WorldStat_Platform_Years::max() : (int) gmdate( 'Y' ) + 10;
+			?>
+			<input type="number" name="wsergo_year" value="<?php echo esc_attr( (string) get_post_meta( $post->ID, WSErgo_CPT::META_YEAR, true ) ); ?>" class="small-text" min="<?php echo esc_attr( (string) $wsergo_y_min ); ?>" max="<?php echo esc_attr( (string) $wsergo_y_max ); ?>" step="1" />
 		</p>
 		<?php
 		$this->render_score_fields( $post->ID, 'building', true );
@@ -2104,7 +2110,11 @@ class WSErgo_Admin {
 						<tr>
 							<th scope="row"><label for="wsergo_macro_reference_year"><?php esc_html_e( 'Опорный год (макро)', 'worldstat-ergonomics' ); ?></label></th>
 							<td>
-								<input type="number" id="wsergo_macro_reference_year" name="<?php echo esc_attr( WSErgo_Settings::OPTION_MACRO_REFERENCE_YEAR ); ?>" value="<?php echo esc_attr( (string) $macro_year ); ?>" class="small-text" min="1900" max="2100" step="1" />
+								<?php
+								$mref_min = class_exists( 'WorldStat_Platform_Years' ) ? max( 1900, WorldStat_Platform_Years::min() ) : 1900;
+								$mref_max = class_exists( 'WorldStat_Platform_Years' ) ? max( 2100, WorldStat_Platform_Years::max() ) : 2100;
+								?>
+								<input type="number" id="wsergo_macro_reference_year" name="<?php echo esc_attr( WSErgo_Settings::OPTION_MACRO_REFERENCE_YEAR ); ?>" value="<?php echo esc_attr( (string) $macro_year ); ?>" class="small-text" min="<?php echo esc_attr( (string) $mref_min ); ?>" max="<?php echo esc_attr( (string) $mref_max ); ?>" step="1" />
 								<p class="description"><?php esc_html_e( 'Год для выборки значений country_code + year в CSV (если в файле есть столбец года).', 'worldstat-ergonomics' ); ?></p>
 							</td>
 						</tr>

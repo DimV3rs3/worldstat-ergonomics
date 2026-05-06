@@ -12,6 +12,23 @@ if ( ! defined( 'ABSPATH' ) ) {
 class WSErgo_Renderer {
 
 	/**
+	 * Точность вывода сырого значения по техническому ключу (как в прежней вёрстке).
+	 */
+	private static function macro_raw_metric_decimals( string $sig ): int {
+		$sig = sanitize_key( $sig );
+		if ( preg_match( '/__(cnt|psn)$/', $sig ) || preg_match( '/net_migration/', $sig ) ) {
+			return 0;
+		}
+		if ( strpos( $sig, 'dens' ) !== false ) {
+			return 4;
+		}
+		if ( preg_match( '/_01$|big_city_ratio|dependency|pressure/', $sig ) ) {
+			return 3;
+		}
+		return 2;
+	}
+
+	/**
 	 * Стили для страницы города (бейдж и карточка E).
 	 */
 	public static function enqueue_public_assets(): void {
@@ -381,7 +398,6 @@ class WSErgo_Renderer {
 			$analysis_url = home_url( '/analysis-data/' );
 		}
 
-		$diag       = isset( $detail['diagnostics'] ) && is_array( $detail['diagnostics'] ) ? $detail['diagnostics'] : array();
 		$raw        = isset( $detail['raw_row'] ) && is_array( $detail['raw_row'] ) ? $detail['raw_row'] : null;
 		$scores     = isset( $detail['scores'] ) && is_array( $detail['scores'] ) ? $detail['scores'] : null;
 		$year       = (int) ( $detail['year'] ?? 0 );
@@ -398,13 +414,31 @@ class WSErgo_Renderer {
 			return number_format( (float) $v, $decimals, ',', ' ' );
 		};
 
-		$missing = isset( $diag['missing_csv_metrics'] ) && is_array( $diag['missing_csv_metrics'] ) ? $diag['missing_csv_metrics'] : array();
-		$derived = isset( $diag['triangle_derived_metrics'] ) && is_array( $diag['triangle_derived_metrics'] ) ? $diag['triangle_derived_metrics'] : array();
-		$sdg_abs = ! empty( $diag['sdg_row_absent'] );
-		$cl_imp  = isset( $diag['cluster_median_imputed_features'] ) && is_array( $diag['cluster_median_imputed_features'] ) ? $diag['cluster_median_imputed_features'] : array();
-		$axis_u  = isset( $diag['axis_weight_used'] ) && is_array( $diag['axis_weight_used'] ) ? $diag['axis_weight_used'] : array();
-		$idx_bad    = ! empty( $diag['index_unavailable'] );
-		$dimless_tri = ! empty( $diag['triangle_dimensionless_baseline'] );
+		$axis_terms_detail = isset( $detail['axis_terms'] ) && is_array( $detail['axis_terms'] ) ? $detail['axis_terms'] : array();
+		if ( empty( $axis_terms_detail ) && class_exists( 'WSErgo_Settings' ) ) {
+			$axis_terms_detail = WSErgo_Settings::get_macro_axis_terms_resolved();
+		}
+		if ( empty( $axis_terms_detail ) && class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			$axis_terms_detail = WSErgo_Country_Macro_Calculator::default_macro_axis_terms();
+		}
+		$signal_axes_map = array();
+		foreach ( $axis_terms_detail as $ax_k => $rows_ax ) {
+			if ( ! is_array( $rows_ax ) ) {
+				continue;
+			}
+			foreach ( $rows_ax as $tr_ax ) {
+				$sig = sanitize_key( (string) ( $tr_ax['signal'] ?? '' ) );
+				if ( $sig === '' ) {
+					continue;
+				}
+				if ( ! isset( $signal_axes_map[ $sig ] ) ) {
+					$signal_axes_map[ $sig ] = array();
+				}
+				$signal_axes_map[ $sig ][ $ax_k ] = true;
+			}
+		}
+		ksort( $signal_axes_map, SORT_STRING );
+		$n_formula_signals = count( $signal_axes_map );
 
 		?>
 		<div class="wsp-ergo-wrapper" style="margin-top:1.25rem;" id="<?php echo esc_attr( $uid ); ?>">
@@ -430,81 +464,6 @@ class WSErgo_Renderer {
 					);
 					?>
 				</p>
-			<?php endif; ?>
-
-			<?php if ( ! empty( $missing ) || ! empty( $derived ) || $sdg_abs || ! empty( $cl_imp ) || ! empty( $axis_u ) || $idx_bad || $dimless_tri ) : ?>
-				<div class="notice notice-info" style="margin:0 0 12px;padding:10px 12px;border-left:4px solid #2271b1;background:#f0f6fc;">
-					<?php if ( $idx_bad && ( null === $scores || ! isset( $scores['E'] ) ) ) : ?>
-						<p style="margin:0 0 .5em;"><strong><?php esc_html_e( 'Сводный индекс E не выведен', 'worldstat-ergonomics' ); ?></strong> — <?php esc_html_e( 'недостаточно конечных значений по осям после нормализации.', 'worldstat-ergonomics' ); ?></p>
-					<?php endif; ?>
-					<?php if ( ! empty( $missing ) ) : ?>
-						<p style="margin:0 0 .5em;"><strong><?php esc_html_e( 'Нет данных в CSV за выбранный год (или файл не загружен):', 'worldstat-ergonomics' ); ?></strong></p>
-						<ul style="margin:0 0 .5em 1.1em;">
-							<?php foreach ( $missing as $mk ) : ?>
-								<li><?php echo esc_html( class_exists( 'WSErgo_Country_Macro_Calculator' ) ? WSErgo_Country_Macro_Calculator::data_label_ru( (string) $mk ) : (string) $mk ); ?> <code><?php echo esc_html( (string) $mk ); ?></code></li>
-							<?php endforeach; ?>
-						</ul>
-					<?php endif; ?>
-					<?php if ( ! empty( $derived ) ) : ?>
-						<p style="margin:0 0 .5em;">
-							<strong><?php esc_html_e( 'Восстановлено из связки население — площадь — плотность:', 'worldstat-ergonomics' ); ?></strong>
-							<?php
-							$parts = array();
-							foreach ( $derived as $dk ) {
-								$dk      = sanitize_key( (string) $dk );
-								$parts[] = class_exists( 'WSErgo_Country_Macro_Calculator' ) ? WSErgo_Country_Macro_Calculator::data_label_ru( $dk ) : $dk;
-							}
-							echo esc_html( implode( '; ', $parts ) );
-							?>
-						</p>
-					<?php endif; ?>
-					<?php if ( $dimless_tri ) : ?>
-						<p style="margin:0 0 .5em;">
-							<strong><?php esc_html_e( 'Базовый треугольник по плотности', 'worldstat-ergonomics' ); ?></strong>
-							<?php esc_html_e( '— в CSV нет населения и площади территории; для расчёта подставлен условный масштаб с той же плотностью. Индекс и кластеры осмысленны для сравнения стран по форме профиля (SDG, инфраструктура, демография в wide); абсолютные «на душу» и доли застройки от площади страны к реальным км² не привязаны, пока не загрузите реальные population_total и surface_area_sqkm.', 'worldstat-ergonomics' ); ?>
-						</p>
-					<?php endif; ?>
-					<?php if ( $sdg_abs ) : ?>
-						<p style="margin:0 0 .5em;"><?php esc_html_e( 'Строка SDG за год не найдена: показатели SDG не подставляются; оси считаются только по доступным нормализованным слагаемым.', 'worldstat-ergonomics' ); ?></p>
-					<?php endif; ?>
-					<?php if ( ! empty( $cl_imp ) ) : ?>
-						<p style="margin:0 0 .5em;">
-							<strong><?php esc_html_e( 'Кластеризация (k-means):', 'worldstat-ergonomics' ); ?></strong>
-							<?php esc_html_e( 'для вектора позиции страны пропущенные признаки заменены медианой по выборке из загруженных стран.', 'worldstat-ergonomics' ); ?>
-							<code style="font-size:.85em;"><?php echo esc_html( implode( ', ', $cl_imp ) ); ?></code>
-						</p>
-					<?php endif; ?>
-					<?php if ( ! empty( $axis_u ) && is_array( $axis_u ) ) : ?>
-						<?php
-						$axis_keys = array( 'F', 'Cm', 'H', 'A', 'S', 'Ct' );
-						$min_axis_frac = 1.0;
-						foreach ( $axis_keys as $ax ) {
-							if ( isset( $axis_u[ $ax ] ) && is_numeric( $axis_u[ $ax ] ) ) {
-								$min_axis_frac = min( $min_axis_frac, (float) $axis_u[ $ax ] );
-							}
-						}
-						?>
-						<?php if ( $min_axis_frac >= 0.999 ) : ?>
-							<p style="margin:0;">
-								<strong><?php esc_html_e( 'Полнота данных по осям F–Ct', 'worldstat-ergonomics' ); ?></strong>
-								<?php esc_html_e( '— все слагаемые в взвешенных суммах для каждой оси были конечными, поэтому доля «использованного» веса по каждой оси равна 100%. Это не «оценка качества жизни», а техническая метрика: ни одного пропущенного слагаемого, которое пришлось бы выкинуть из среднего.', 'worldstat-ergonomics' ); ?>
-							</p>
-						<?php else : ?>
-							<p style="margin:0;"><strong><?php esc_html_e( 'Доля веса осей с реальными данными (остальное пропущено в среднем):', 'worldstat-ergonomics' ); ?></strong>
-								<?php
-								$bits = array();
-								foreach ( $axis_keys as $ax ) {
-									if ( isset( $axis_u[ $ax ] ) && is_numeric( $axis_u[ $ax ] ) ) {
-										$p = round( 100.0 * (float) $axis_u[ $ax ] );
-										$bits[] = $ax . ' ' . $p . '%';
-									}
-								}
-								echo esc_html( implode( '; ', $bits ) );
-								?>
-							</p>
-						<?php endif; ?>
-					<?php endif; ?>
-				</div>
 			<?php endif; ?>
 
 			<?php if ( is_array( $scores ) && isset( $scores['E'] ) && is_finite( (float) $scores['E'] ) ) : ?>
@@ -543,7 +502,7 @@ class WSErgo_Renderer {
 				<div class="wsergo-macro-detail-views">
 					<div class="wsergo-macro-view-tabs" role="tablist" aria-label="<?php esc_attr_e( 'Режим отображения сырых показателей', 'worldstat-ergonomics' ); ?>">
 						<button type="button" class="wsergo-macro-view-tab active" role="tab" aria-selected="true" data-wsergo-macro-view="axes"><?php esc_html_e( 'По осям F…Ct', 'worldstat-ergonomics' ); ?></button>
-						<button type="button" class="wsergo-macro-view-tab" role="tab" aria-selected="false" data-wsergo-macro-view="themes"><?php esc_html_e( 'По темам данных', 'worldstat-ergonomics' ); ?></button>
+						<button type="button" class="wsergo-macro-view-tab" role="tab" aria-selected="false" data-wsergo-macro-view="themes"><?php echo esc_html( sprintf( /* translators: %d: count of unique indicators in the macro formula */ __( 'Все показатели формулы (%d)', 'worldstat-ergonomics' ), (int) $n_formula_signals ) ); ?></button>
 					</div>
 					<div class="wsergo-macro-view" data-wsergo-macro-view-panel="axes">
 				<div class="ergo-layout">
@@ -556,136 +515,72 @@ class WSErgo_Renderer {
 						<button type="button" class="ergo-vertical-btn" data-wsergo-macro-target="Ct"><span class="dashicons dashicons-admin-settings"></span> <?php esc_html_e( 'Управляемость Ct', 'worldstat-ergonomics' ); ?></button>
 					</div>
 					<div class="ergo-content">
-						<div class="ergo-macro-panel" data-wsergo-macro-panel="F" style="display:block;">
-							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'Сырые признаки, из которых после нормализации внутри кластера собирается ось F (часть слагаемых в модели инвертируется, см. «Подробности расчёта»).', 'worldstat-ergonomics' ); ?></p>
+						<?php
+						$axis_order = array( 'F', 'Cm', 'H', 'A', 'S', 'Ct' );
+						$axis_leads = array(
+							'F'  => __( 'Сырые признаки, из которых после нормализации внутри кластера собирается ось F (часть слагаемых в модели инвертируется, см. «Подробности расчёта»). Список соответствует матрице критериев в админке.', 'worldstat-ergonomics' ),
+							'Cm' => __( 'Сырые признаки для оси Cm (часть слагаемых в модели инвертируется). Список соответствует матрице критериев в админке.', 'worldstat-ergonomics' ),
+							'H'  => __( 'Сырые признаки для оси H. Список соответствует матрице критериев в админке.', 'worldstat-ergonomics' ),
+							'A'  => __( 'Сырые признаки для оси A. Список соответствует матрице критериев в админке.', 'worldstat-ergonomics' ),
+							'S'  => __( 'Сырые признаки для оси S. Список соответствует матрице критериев в админке.', 'worldstat-ergonomics' ),
+							'Ct' => __( 'Сырые признаки для оси Ct. Список соответствует матрице критериев в админке.', 'worldstat-ergonomics' ),
+						);
+						foreach ( $axis_order as $ai => $ax ) :
+							$terms_ax = isset( $axis_terms_detail[ $ax ] ) && is_array( $axis_terms_detail[ $ax ] ) ? $axis_terms_detail[ $ax ] : array();
+							$lead_ax  = $axis_leads[ $ax ] ?? __( 'Сырые признаки для этой оси.', 'worldstat-ergonomics' );
+							?>
+						<div class="ergo-macro-panel" data-wsergo-macro-panel="<?php echo esc_attr( $ax ); ?>" style="display:<?php echo ( 0 === $ai ) ? 'block' : 'none'; ?>;">
+							<p class="wsergo-macro-panel-lead"><?php echo esc_html( $lead_ax ); ?></p>
+							<?php if ( empty( $terms_ax ) ) : ?>
+							<p class="wsp-muted"><?php esc_html_e( 'Для этой оси в текущей конфигурации нет слагаемых.', 'worldstat-ergonomics' ); ?></p>
+							<?php else : ?>
 							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'transport_dens' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['transport_dens'] ?? null, 4 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'air_departures__cnt' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['air_departures__cnt'] ?? null, 0 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'air_passengers__psn' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['air_passengers__psn'] ?? null, 0 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'internet_users__ptc' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['internet_users__ptc'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'broadband__per_100_psn' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['broadband__per_100_psn'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'mobile_subs__per_100_psn' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['mobile_subs__per_100_psn'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'secure_servers__per_1m_psn' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['secure_servers__per_1m_psn'] ?? null, 2 ) ); ?></span></li>
+								<?php
+								foreach ( $terms_ax as $tr_ax ) :
+									$sig = sanitize_key( (string) ( $tr_ax['signal'] ?? '' ) );
+									if ( $sig === '' ) {
+										continue;
+									}
+									$dec = self::macro_raw_metric_decimals( $sig );
+									?>
+								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( $sig ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw[ $sig ] ?? null, $dec ) ); ?></span></li>
+									<?php endforeach; ?>
 							</ul>
+							<?php endif; ?>
 						</div>
-						<div class="ergo-macro-panel" data-wsergo-macro-panel="Cm" style="display:none;">
-							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'Сырые признаки для оси Cm (часть слагаемых в модели инвертируется).', 'worldstat-ergonomics' ); ?></p>
-							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'pm25_exposure__mcg_per_m3' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['pm25_exposure__mcg_per_m3'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'co2_per_capita__tonnes_per_psn' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['co2_per_capita__tonnes_per_psn'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'renewable_energy__ptc' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['renewable_energy__ptc'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'forest_cover_01' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['forest_cover_01'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'forest_per_capita_m2' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['forest_per_capita_m2'] ?? null, 1 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'wASH_access_index' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['wASH_access_index'] ?? null, 2 ) ); ?></span></li>
-							</ul>
-						</div>
-						<div class="ergo-macro-panel" data-wsergo-macro-panel="H" style="display:none;">
-							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'Сырые признаки для оси H.', 'worldstat-ergonomics' ); ?></p>
-							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'life_exp_total__years' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['life_exp_total__years'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'age_dependency_proxy' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['age_dependency_proxy'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'fertility_rate__births_per_woman' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['fertility_rate__births_per_woman'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'net_migration__psn' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['net_migration__psn'] ?? null, 0 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'urban_share_01' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_share_01'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'pop_in_1m_aggl__ptc' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['pop_in_1m_aggl__ptc'] ?? null, 2 ) ); ?></span></li>
-							</ul>
-						</div>
-						<div class="ergo-macro-panel" data-wsergo-macro-panel="A" style="display:none;">
-							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'Сырые признаки для оси A.', 'worldstat-ergonomics' ); ?></p>
-							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'transport_dens' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['transport_dens'] ?? null, 4 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'air_passengers__psn' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['air_passengers__psn'] ?? null, 0 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'air_departures__cnt' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['air_departures__cnt'] ?? null, 0 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'urban_share_01' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_share_01'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'urban_pop_growth__ptc' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_pop_growth__ptc'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'digital_access_index' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['digital_access_index'] ?? null, 2 ) ); ?></span></li>
-							</ul>
-						</div>
-						<div class="ergo-macro-panel" data-wsergo-macro-panel="S" style="display:none;">
-							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'Сырые признаки для оси S.', 'worldstat-ergonomics' ); ?></p>
-							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'pm25_exposure__mcg_per_m3' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['pm25_exposure__mcg_per_m3'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'co2_per_capita__tonnes_per_psn' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['co2_per_capita__tonnes_per_psn'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'life_exp_total__years' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['life_exp_total__years'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'infect_and_stress_burden' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['infect_and_stress_burden'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'health_system_capacity' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['health_system_capacity'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'debt_stress' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['debt_stress'] ?? null, 3 ) ); ?></span></li>
-							</ul>
-						</div>
-						<div class="ergo-macro-panel" data-wsergo-macro-panel="Ct" style="display:none;">
-							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'Сырые признаки для оси Ct.', 'worldstat-ergonomics' ); ?></p>
-							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'women_parliament_seats__ptc' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['women_parliament_seats__ptc'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'fiscal_transparency_proxy' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['fiscal_transparency_proxy'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'tax_revenue__ptc_gdp' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['tax_revenue__ptc_gdp'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'rent_fuels' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['rent_fuels'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'clean_elec_share__ptc' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['clean_elec_share__ptc'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'net_oda_received__ptc_gni' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['net_oda_received__ptc_gni'] ?? null, 2 ) ); ?></span></li>
-							</ul>
-						</div>
+						<?php endforeach; ?>
 					</div>
 				</div>
 					</div>
 					<div class="wsergo-macro-view" data-wsergo-macro-view-panel="themes" style="display:none;">
-				<div class="ergo-layout">
-					<div class="ergo-sidebar">
-						<button type="button" class="ergo-vertical-btn active" data-wsergo-macro-target="roads"><span class="dashicons dashicons-car"></span> <?php esc_html_e( 'Транспорт', 'worldstat-ergonomics' ); ?></button>
-						<button type="button" class="ergo-vertical-btn" data-wsergo-macro-target="urban"><span class="dashicons dashicons-building"></span> <?php esc_html_e( 'Городская среда', 'worldstat-ergonomics' ); ?></button>
-						<button type="button" class="ergo-vertical-btn" data-wsergo-macro-target="green"><span class="dashicons dashicons-chart-area"></span> <?php esc_html_e( 'Зелёный каркас', 'worldstat-ergonomics' ); ?></button>
-						<button type="button" class="ergo-vertical-btn" data-wsergo-macro-target="biodiversity"><span class="dashicons dashicons-heart"></span> <?php esc_html_e( 'Биоразнообразие', 'worldstat-ergonomics' ); ?></button>
-						<button type="button" class="ergo-vertical-btn" data-wsergo-macro-target="industry"><span class="dashicons dashicons-hammer"></span> <?php esc_html_e( 'Промышленность', 'worldstat-ergonomics' ); ?></button>
-						<button type="button" class="ergo-vertical-btn" data-wsergo-macro-target="tech"><span class="dashicons dashicons-admin-tools"></span> <?php esc_html_e( 'Инновации и инфраструктура', 'worldstat-ergonomics' ); ?></button>
+						<p class="wsergo-macro-panel-lead"><?php echo esc_html( sprintf( /* translators: %d: number of unique technical indicators in the formula */ __( 'Уникальные показатели, участвующие в расчёте осей по текущей формуле из админки (%d). Для каждого указаны оси F–Ct, где он используется.', 'worldstat-ergonomics' ), (int) $n_formula_signals ) ); ?></p>
+						<ul class="wsergo-macro-kv">
+							<?php
+							foreach ( $signal_axes_map as $sig_map => $ax_keys_set ) :
+								$axes_for_sig = array_keys( $ax_keys_set );
+								usort(
+									$axes_for_sig,
+									static function ( $a, $b ) use ( $axis_order ) {
+										$ia = array_search( $a, $axis_order, true );
+										$ib = array_search( $b, $axis_order, true );
+										$ia = false === $ia ? 99 : (int) $ia;
+										$ib = false === $ib ? 99 : (int) $ib;
+										return $ia <=> $ib;
+									}
+								);
+								$axes_str      = implode( ', ', $axes_for_sig );
+								$dec_formula   = self::macro_raw_metric_decimals( $sig_map );
+								?>
+							<li>
+								<span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( $sig_map ) ); ?></span>
+								<span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw[ $sig_map ] ?? null, $dec_formula ) ); ?></span>
+								<?php if ( $axes_str !== '' ) : ?>
+								<span class="wsergo-macro-kv__meta" style="display:block;font-size:.82rem;color:#64748b;margin-top:4px;"><?php echo esc_html( sprintf( /* translators: %s: comma-separated axis codes like F, Cm */ __( 'Оси: %s', 'worldstat-ergonomics' ), $axes_str ) ); ?></span>
+								<?php endif; ?>
+							</li>
+							<?php endforeach; ?>
+						</ul>
 					</div>
-					<div class="ergo-content">
-						<div class="ergo-macro-panel" data-wsergo-macro-panel="roads" style="display:block;">
-							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'Плотность транспортной сети (сырые признаки после агрегации по территории).', 'worldstat-ergonomics' ); ?></p>
-							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'rail_dens_km_per_km2' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['rail_dens_km_per_km2'] ?? null, 4 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'road_dens_km_per_km2' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['road_dens_km_per_km2'] ?? null, 4 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'transport_dens' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['transport_dens'] ?? null, 4 ) ); ?></span></li>
-							</ul>
-						</div>
-						<div class="ergo-macro-panel" data-wsergo-macro-panel="urban" style="display:none;">
-							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'urban_share_01' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_share_01'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'big_city_ratio' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['big_city_ratio'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'pop_in_1m_aggl__ptc' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['pop_in_1m_aggl__ptc'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'urban_pop_growth__ptc' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['urban_pop_growth__ptc'] ?? null, 2 ) ); ?></span></li>
-							</ul>
-						</div>
-						<div class="ergo-macro-panel" data-wsergo-macro-panel="green" style="display:none;">
-							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'forest_cover_01' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['forest_cover_01'] ?? null, 3 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'forest_per_capita_m2' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['forest_per_capita_m2'] ?? null, 1 ) ); ?></span></li>
-							</ul>
-						</div>
-						<div class="ergo-macro-panel" data-wsergo-macro-panel="biodiversity" style="display:none;">
-							<p class="wsergo-macro-panel-lead"><?php esc_html_e( 'Прокси устойчивости природной среды в новой модели.', 'worldstat-ergonomics' ); ?></p>
-							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'protected_terrestrial__ptc' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['protected_terrestrial__ptc'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'agri_pressure' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['agri_pressure'] ?? null, 3 ) ); ?></span></li>
-							</ul>
-						</div>
-						<div class="ergo-macro-panel" data-wsergo-macro-panel="industry" style="display:none;">
-							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'energy_use_per_cap__kgoe' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['energy_use_per_cap__kgoe'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'gdp_per_energy__ppp_per_kgoe' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['gdp_per_energy__ppp_per_kgoe'] ?? null, 2 ) ); ?></span></li>
-							</ul>
-						</div>
-						<div class="ergo-macro-panel" data-wsergo-macro-panel="tech" style="display:none;">
-							<ul class="wsergo-macro-kv">
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'internet_users__ptc' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['internet_users__ptc'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'broadband__per_100_psn' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['broadband__per_100_psn'] ?? null, 2 ) ); ?></span></li>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( 'digital_access_index' ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw['digital_access_index'] ?? null, 2 ) ); ?></span></li>
-							</ul>
-						</div>
-					</div>
-				</div>
-					</div>
-				</div>
-				<div style="margin-top:1rem;padding:.8rem 1rem;background:#eef2ff;border-radius:12px;font-size:.9rem;color:#1e3a8a;">
-					<span class="dashicons dashicons-database" style="vertical-align:text-bottom;"></span>
-					<?php esc_html_e( 'Значения «—» означают отсутствие исходного ряда за опорный год; расчёт осей выполняется по оставшимся слагаемым.', 'worldstat-ergonomics' ); ?>
 				</div>
 				<script>
 				(function(){
@@ -738,6 +633,22 @@ class WSErgo_Renderer {
 	private static function render_country_macro_methodology_details(): void {
 		$k = ( class_exists( 'WSErgo_Settings' ) ) ? (int) WSErgo_Settings::get_macro_k_clusters() : 4;
 		$k = max( 1, $k );
+		$ew_defaults = array(
+			'F'  => 0.24,
+			'Cm' => 0.22,
+			'H'  => 0.18,
+			'A'  => 0.14,
+			'S'  => 0.12,
+			'Ct' => 0.10,
+		);
+		$ew       = class_exists( 'WSErgo_Settings' ) ? WSErgo_Settings::get_macro_e_axis_weights() : $ew_defaults;
+		$ew_order = array( 'F', 'Cm', 'H', 'A', 'S', 'Ct' );
+		$e_parts  = array();
+		foreach ( $ew_order as $ax_k ) {
+			$w = isset( $ew[ $ax_k ] ) ? (float) $ew[ $ax_k ] : (float) ( $ew_defaults[ $ax_k ] ?? 0.0 );
+			$e_parts[] = number_format( $w, 2, ',', '' ) . '·' . $ax_k;
+		}
+		$e_formula_line = '<strong>E</strong> = ' . implode( ' + ', $e_parts );
 		?>
 		<details class="wsergo-macro-methodology" style="margin-top:1.1rem;border:1px solid var(--wsp-gray-200,#e5e7eb);border-radius:12px;background:#fafafa;overflow:hidden;">
 			<summary style="cursor:pointer;list-style:none;padding:12px 16px;font-weight:600;color:var(--wsp-gray-900,#111827);display:flex;align-items:center;gap:8px;user-select:none;" class="wsergo-macro-methodology-summary">
@@ -764,11 +675,11 @@ class WSErgo_Renderer {
 					<li><strong>Ct</strong> — <?php esc_html_e( 'управляемость: представительство, фискальные прокси, энергетическая и долговая структура.', 'worldstat-ergonomics' ); ?></li>
 				</ul>
 				<p style="margin:0 0 10px;font-family:ui-monospace,'Cascadia Code',monospace;font-size:.88rem;background:#fff;padding:10px 12px;border-radius:8px;border:1px solid #e5e7eb;">
-					<strong>E</strong> = 0,24·F + 0,22·Cm + 0,18·H + 0,14·A + 0,12·S + 0,10·Ct<br />
-					<?php esc_html_e( 'Сводный E на карточке — E×100 (шкала 0…100). Если после шагов E не конечен или ≤0, индекс не показывается.', 'worldstat-ergonomics' ); ?>
+					<?php echo wp_kses_post( $e_formula_line ); ?><br />
+					<?php esc_html_e( 'Веса по осям задаются в админке плагина (Макро → веса E). Сводный E на карточке — E×100 (шкала 0…100). Если после шагов E не конечен или ≤0, индекс не показывается.', 'worldstat-ergonomics' ); ?>
 				</p>
 				<p class="wsp-muted" style="margin:0;font-size:.85rem;">
-					<?php esc_html_e( 'Текст соответствует коду WSErgo_Country_Macro_Calculator; при смене логики в плагине сверяйте с файлом class-ergo-country-macro-calculator.php.', 'worldstat-ergonomics' ); ?>
+					<?php esc_html_e( 'Состав осей F–Ct задаётся матрицей критериев в админке; расчёт соответствует WSErgo_Country_Macro_Calculator.', 'worldstat-ergonomics' ); ?>
 				</p>
 			</div>
 		</details>

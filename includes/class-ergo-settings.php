@@ -175,8 +175,10 @@ class WSErgo_Settings {
 	}
 
 	public static function get_macro_reference_year(): int {
-		$y = (int) get_option( self::OPTION_MACRO_REFERENCE_YEAR, 2022 );
-		return max( 1900, min( 2100, $y ) );
+		$y   = (int) get_option( self::OPTION_MACRO_REFERENCE_YEAR, 2022 );
+		$min = class_exists( 'WorldStat_Platform_Years' ) ? max( 1900, WorldStat_Platform_Years::min() ) : 1900;
+		$max = class_exists( 'WorldStat_Platform_Years' ) ? max( 2100, WorldStat_Platform_Years::max() ) : 2100;
+		return max( $min, min( $max, $y ) );
 	}
 
 	public static function get_macro_reference_country_post_id(): int {
