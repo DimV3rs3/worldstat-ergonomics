@@ -19,7 +19,7 @@ class WSErgo_Country_Macro_Calculator {
 	private const TRANSIENT_KEY = 'wsergo_macro_scores_bundle_v11';
 
 	/** Инкремент при изменении логики расчёта — сбрасывает устаревший transient без смены CSV. */
-	private const SCORE_BUNDLE_LOGIC = 21;
+	private const SCORE_BUNDLE_LOGIC = 22;
 
 	/** @var array<string, string>|null ISO2 => ISO3 из data/countries.json платформы */
 	private static $iso2_to_iso3_file_cache = null;
@@ -206,34 +206,46 @@ class WSErgo_Country_Macro_Calculator {
 	}
 
 	/**
-	 * Встроенные ключи сигналов (k-means, нормализация, формулы по умолчанию), без пользовательских дополнений.
+	 * Сигналы для матрицы, подписей и санитизации: только столбцы из сохранённых CSV (+ слаги из import_metric_slugs) и строки из
+	 * «Дополнительные ключи признаков». Без жёстко прошитого набора — иначе при одном датасете в списке оказывались десятки
+	 * чужих показателей.
 	 *
-	 * @return list<string>
-	 */
-	public static function macro_signal_builtin_slist(): array {
-		$aliases = array( 'sdg11', 'sdg9', 'sdg16', 'sdg_index' );
-		$merged  = array_merge( self::CLUSTER_FEATURES, self::NORMALIZE_WITHIN_CLUSTER, $aliases );
-		$merged  = array_values( array_unique( $merged ) );
-		sort( $merged );
-		return $merged;
-	}
-
-	/**
-	 * Сигналы, допустимые в формулах макро-осей и в списке признаков кластеризации (встроенные + из настроек «Доп. ключи»).
-	 *
-	 * Новые столбцы wide: имя после нормализации заголовка = ключ в строке признаков; чтобы ключ появился здесь, задайте его в
-	 * {@see WSErgo_Settings::OPTION_MACRO_EXTRA_SIGNALS_TEXT} или добавьте сопоставление в {@see self::wide_csv_column_to_signal()}.
+	 * Встроенные признаки расчёта по-прежнему используются в коде осей/k-means; в админке они не подмешиваются автоматически.
 	 *
 	 * @return list<string>
 	 */
 	public static function macro_signal_allowlist(): array {
-		$merged = self::macro_signal_builtin_slist();
+		$merged = array();
 		if ( class_exists( 'WSErgo_Settings' ) ) {
 			$merged = array_merge( $merged, WSErgo_Settings::get_macro_extra_signals_effective() );
+			$merged = array_merge( $merged, WSErgo_Settings::get_macro_custom_metric_slugs_effective() );
 		}
-		$merged = array_values( array_unique( $merged ) );
+		$has_uploaded = self::has_macro_csv_data_sources();
+		if ( $has_uploaded && class_exists( 'WorldStat_Uploaded_Csv' ) ) {
+			$merged = array_merge( $merged, WorldStat_Uploaded_Csv::get_cached_all_metric_column_keys() );
+		}
+		$merged = array_values( array_unique( array_map( 'sanitize_key', $merged ) ) );
+		$merged = array_filter(
+			$merged,
+			static function ( $x ) {
+				return $x !== '';
+			}
+		);
 		sort( $merged );
-		return $merged;
+		return array_values( $merged );
+	}
+
+	/**
+	 * В БД платформы есть хотя бы один сохранённый CSV — показывать ключи из файлов и матрицу.
+	 */
+	public static function has_macro_csv_data_sources(): bool {
+		if ( ! class_exists( 'WorldStat_Uploaded_Csv' ) ) {
+			return false;
+		}
+		if ( ! WorldStat_Uploaded_Csv::table_exists() ) {
+			return false;
+		}
+		return WorldStat_Uploaded_Csv::has_any_stored_datasets();
 	}
 
 	/**
@@ -243,12 +255,12 @@ class WSErgo_Country_Macro_Calculator {
 	 */
 	public static function macro_axis_labels_ru(): array {
 		return array(
-			'F'  => __( 'Функциональность (F)', 'worldstat-ergonomics' ),
-			'Cm' => __( 'Комфорт (Cm)', 'worldstat-ergonomics' ),
-			'H'  => __( 'Здоровье / среда (H)', 'worldstat-ergonomics' ),
-			'A'  => __( 'Доступность (A)', 'worldstat-ergonomics' ),
-			'S'  => __( 'Безопасность / устойчивость (S)', 'worldstat-ergonomics' ),
-			'Ct' => __( 'Управляемость (Ct)', 'worldstat-ergonomics' ),
+			'F'  => __( 'Функциональность', 'worldstat-ergonomics' ),
+			'Cm' => __( 'Комфортность', 'worldstat-ergonomics' ),
+			'H'  => __( 'Обитаемость', 'worldstat-ergonomics' ),
+			'A'  => __( 'Освояемость', 'worldstat-ergonomics' ),
+			'S'  => __( 'Безопасность', 'worldstat-ergonomics' ),
+			'Ct' => __( 'Управляемость', 'worldstat-ergonomics' ),
 		);
 	}
 
@@ -365,22 +377,62 @@ class WSErgo_Country_Macro_Calculator {
 	}
 
 	/**
-	 * Подписи стандартных рядов CSV (для сообщений о пропусках).
+	 * Встроенного словаря переводов нет — только опция пользователя и файл «Переводы» в админке CSV.
 	 *
 	 * @return array<string, string>
 	 */
 	public static function standard_metric_labels_ru(): array {
-		return array(
-			'population_total'           => __( 'Население, чел.', 'worldstat-ergonomics' ),
-			'surface_area_sqkm'        => __( 'Площадь территории, км²', 'worldstat-ergonomics' ),
-			'population_density_per_km2' => __( 'Плотность населения на км²', 'worldstat-ergonomics' ),
-			'urban_share_percent'      => __( 'Доля городского населения, %', 'worldstat-ergonomics' ),
-			'urban_land_area_sqkm'     => __( 'Площадь городской застройки, км²', 'worldstat-ergonomics' ),
-			'forest_percentage'        => __( 'Лесной покров, %', 'worldstat-ergonomics' ),
-			'largest_city_population'  => __( 'Население крупнейшего города', 'worldstat-ergonomics' ),
-			'railway_length'           => __( 'Железные дороги, км', 'worldstat-ergonomics' ),
-			'road_length'              => __( 'Дороги, км', 'worldstat-ergonomics' ),
+		return array();
+	}
+
+	/**
+	 * @return array<string, string>
+	 */
+	public static function macro_signal_ru_defaults(): array {
+		return array();
+	}
+
+	/**
+	 * Человекочитаемая подпись: только сохранённое пользователем для этого ключа; иначе прочерк.
+	 */
+	public static function data_label_ru( string $key ): string {
+		$key = sanitize_key( $key );
+		if ( $key === '' ) {
+			return '—';
+		}
+		if ( ! class_exists( 'WSErgo_Settings' ) ) {
+			return '—';
+		}
+		$custom = WSErgo_Settings::get_data_labels_ru();
+		if ( isset( $custom[ $key ] ) && $custom[ $key ] !== '' ) {
+			return $custom[ $key ];
+		}
+		return '—';
+	}
+
+	/**
+	 * Словаря по умолчанию нет — placeholder задаётся в шаблоне админки.
+	 */
+	public static function default_data_label_ru( string $key ): string {
+		return '';
+	}
+
+	/**
+	 * Ключи для таблицы подписей: то же, что {@see macro_signal_allowlist()} (столбцы из CSV + доп. ключи).
+	 *
+	 * @return list<string>
+	 */
+	public static function all_data_label_keys(): array {
+		$u = self::macro_signal_allowlist();
+		$u = array_unique( array_map( 'sanitize_key', $u ) );
+		$u = array_filter(
+			$u,
+			static function ( $x ) {
+				return $x !== '';
+			}
 		);
+		sort( $u );
+		return array_values( $u );
 	}
 
 	public static function get_index_for_iso2( string $iso2 ): float {
@@ -603,6 +655,7 @@ class WSErgo_Country_Macro_Calculator {
 			return $empty;
 		}
 		self::apply_newdata_derived_metrics_to_rows( $rows );
+		self::apply_user_custom_metrics_to_rows( $rows );
 
 		$cluster_feats = self::get_effective_cluster_features();
 
@@ -820,6 +873,68 @@ class WSErgo_Country_Macro_Calculator {
 			$row['rent_fuels'] = $rent_fuels;
 
 			$rows[ $iso3 ] = $row;
+		}
+	}
+
+	/**
+	 * Пользовательские формулы из настроек (после встроенных производных).
+	 *
+	 * @param array<string, array<string, float>> $rows
+	 */
+	private static function apply_user_custom_metrics_to_rows( array &$rows ): void {
+		if ( ! class_exists( 'WSErgo_Settings' ) ) {
+			return;
+		}
+		$defs = WSErgo_Settings::get_macro_custom_metrics();
+		if ( empty( $defs ) ) {
+			return;
+		}
+		$ops_bin = array( 'add' => true, 'sub' => true, 'mul' => true, 'div' => true );
+		foreach ( $rows as $iso3 => &$row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			foreach ( $defs as $def ) {
+				$slug = isset( $def['slug'] ) ? sanitize_key( (string) $def['slug'] ) : '';
+				$op   = isset( $def['op'] ) ? sanitize_key( (string) $def['op'] ) : '';
+				if ( $slug === '' || $op === '' ) {
+					continue;
+				}
+				$ka = isset( $def['key_a'] ) ? sanitize_key( (string) $def['key_a'] ) : '';
+				$kb = isset( $def['key_b'] ) ? sanitize_key( (string) $def['key_b'] ) : '';
+				$c  = isset( $def['const'] ) && is_numeric( $def['const'] ) ? (float) $def['const'] : 0.0;
+				$va = self::finite_or_nan( isset( $row[ $ka ] ) ? (float) $row[ $ka ] : NAN );
+				$vb = self::finite_or_nan( isset( $row[ $kb ] ) ? (float) $row[ $kb ] : NAN );
+				$res = NAN;
+				if ( isset( $ops_bin[ $op ] ) ) {
+					if ( $ka === '' || $kb === '' ) {
+						continue;
+					}
+					if ( $op === 'add' && is_finite( $va ) && is_finite( $vb ) ) {
+						$res = $va + $vb;
+					} elseif ( $op === 'sub' && is_finite( $va ) && is_finite( $vb ) ) {
+						$res = $va - $vb;
+					} elseif ( $op === 'mul' && is_finite( $va ) && is_finite( $vb ) ) {
+						$res = $va * $vb;
+					} elseif ( $op === 'div' ) {
+						$res = self::safe_div( $va, $vb );
+					}
+				} elseif ( $op === 'scale_mul' ) {
+					if ( $ka === '' || ! is_finite( $va ) ) {
+						continue;
+					}
+					$res = $va * $c;
+				} elseif ( $op === 'scale_add' ) {
+					if ( $ka === '' || ! is_finite( $va ) ) {
+						continue;
+					}
+					$res = $va + $c;
+				} else {
+					continue;
+				}
+				$row[ $slug ] = $res;
+			}
+			unset( $row );
 		}
 	}
 
@@ -1665,8 +1780,9 @@ class WSErgo_Country_Macro_Calculator {
 	/**
 	 * Заголовки вроде «Country Code», «Indicator value» → country_code, indicator_value.
 	 */
-	private static function normalize_csv_header_key( string $col ): string {
+	public static function normalize_csv_header_key( string $col ): string {
 		$col = trim( $col );
+		$col = preg_replace( '/^\xEF\xBB\xBF/', '', $col );
 		$c   = strtolower( str_replace( array( "\t", ' ', '-' ), '_', $col ) );
 		return (string) preg_replace( '/[^a-z0-9_]/', '', $c );
 	}

@@ -3,7 +3,7 @@
  * Plugin Name:       WorldStat — Ergonomics
  * Plugin URI:        https://example.com/worldstat-ergonomics
  * Description:       Официальное расширение World Statistics Platform: эргономичность (6 измерений), иерархия помещение→здание→квартал→город→регион→страна, DSL-модели и коэффициенты. Требует платформу и WorldStat Cities.
- * Version:           1.4.1
+ * Version:           1.4.7
  * Requires at least: 5.8
  * Requires PHP:      7.4
  * Requires Plugins:  world-statistics-platform, worldstat-cities
@@ -18,7 +18,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'WSERGO_VERSION', '1.4.1' );
+define( 'WSERGO_VERSION', '1.4.7' );
 define( 'WSERGO_FILE', __FILE__ );
 define( 'WSERGO_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WSERGO_URL', plugin_dir_url( __FILE__ ) );
@@ -241,6 +241,30 @@ add_action(
 );
 add_action(
 	'update_option_' . WSErgo_Settings::OPTION_MACRO_AXIS_TERMS,
+	static function () {
+		if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			WSErgo_Country_Macro_Calculator::flush_cache();
+		}
+	}
+);
+add_action(
+	'update_option_' . WSErgo_Settings::OPTION_MACRO_CRITERIA_MATRIX,
+	static function () {
+		if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			WSErgo_Country_Macro_Calculator::flush_cache();
+		}
+	}
+);
+add_action(
+	'update_option_' . WSErgo_Settings::OPTION_MACRO_CRITERIA_WEIGHTS,
+	static function () {
+		if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			WSErgo_Country_Macro_Calculator::flush_cache();
+		}
+	}
+);
+add_action(
+	'update_option_' . WSErgo_Settings::OPTION_MACRO_CRITERIA_INVERTS,
 	static function () {
 		if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
 			WSErgo_Country_Macro_Calculator::flush_cache();

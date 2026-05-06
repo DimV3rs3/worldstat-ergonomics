@@ -20,6 +20,8 @@ class WSErgo_Settings {
 	public const OPTION_COUNTRY_INDEX_SOURCE = 'wsergo_country_index_source';
 	/** Опорный год для рядов country_code+year в CSV макромодели. */
 	public const OPTION_MACRO_REFERENCE_YEAR = 'wsergo_macro_reference_year';
+	/** ID поста wsp_country — эталон для колонки «Пример данных» на вкладке «Формула». */
+	public const OPTION_MACRO_REFERENCE_COUNTRY_POST_ID = 'wsergo_macro_reference_country_post_id';
 	/** Число кластеров k-means для макромодели (по умолчанию 6). */
 	public const OPTION_MACRO_K_CLUSTERS     = 'wsergo_macro_k_clusters';
 	/**
@@ -37,10 +39,24 @@ class WSErgo_Settings {
 	 */
 	public const OPTION_MACRO_EXTRA_SIGNALS_TEXT = 'wsergo_macro_extra_signals_text';
 	/**
+	 * Пользовательские производные показатели: формулы от двух столбцов или масштабирование одного (см. админку «Данные»).
+	 *
+	 * @var string
+	 */
+	public const OPTION_MACRO_CUSTOM_METRICS = 'wsergo_macro_custom_metrics';
+	/**
 	 * Формулы макро-осей: для F, Cm, H, A, S, Ct — список слагаемых { signal, invert, weight }.
 	 * Пустая ось в опции — подставляется встроенная методика.
 	 */
 	public const OPTION_MACRO_AXIS_TERMS = 'wsergo_macro_axis_terms';
+	/** Пользовательские русские подписи к техническим ключам данных (переопределяют встроенные). */
+	public const OPTION_DATA_LABELS_RU = 'wsergo_data_labels_ru';
+	/** Матрица: признак → для каких осей включён (ключи F, Cm, H, A, S, Ct). */
+	public const OPTION_MACRO_CRITERIA_MATRIX = 'wsergo_macro_criteria_matrix';
+	/** Веса внутри оси: признак → ось → вес (необязательно; пусто = авто, остаток от 1 после ручных). */
+	public const OPTION_MACRO_CRITERIA_WEIGHTS = 'wsergo_macro_criteria_weights';
+	/** Инверсия 1−x: признак → ось → bool (если нет ключа — берётся из встроенной методики). */
+	public const OPTION_MACRO_CRITERIA_INVERTS = 'wsergo_macro_criteria_inverts';
 	/** Сопоставление полей записи wsp_city → id показателя эргономики. */
 	public const OPTION_CITY_FIELD_MAP    = 'wsergo_city_field_map';
 
@@ -161,6 +177,11 @@ class WSErgo_Settings {
 	public static function get_macro_reference_year(): int {
 		$y = (int) get_option( self::OPTION_MACRO_REFERENCE_YEAR, 2022 );
 		return max( 1900, min( 2100, $y ) );
+	}
+
+	public static function get_macro_reference_country_post_id(): int {
+		$id = (int) get_option( self::OPTION_MACRO_REFERENCE_COUNTRY_POST_ID, 0 );
+		return $id > 0 ? $id : 0;
 	}
 
 	public static function get_macro_k_clusters(): int {
@@ -333,10 +354,98 @@ class WSErgo_Settings {
 					'b'  => self::get_macro_csv_bindings(),
 					'w'  => self::get_macro_e_axis_weights(),
 					'cf' => self::get_macro_cluster_features(),
-					'at' => get_option( self::OPTION_MACRO_AXIS_TERMS, [] ),
 					'es' => self::get_macro_extra_signals_effective(),
+					'cx' => self::get_macro_custom_metrics(),
+					'cm' => self::get_macro_criteria_matrix(),
+					'cw' => self::get_macro_criteria_weights(),
+					'ci' => self::get_macro_criteria_inverts(),
 				]
 			)
+		);
+	}
+
+	/**
+	 * Пользовательские формулы производных признаков (после встроенных производных из wide-CSV).
+	 *
+	 * @return list<array{slug:string,op:string,key_a:string,key_b:string,const:float}>
+	 */
+	public static function get_macro_custom_metrics(): array {
+		$raw = get_option( self::OPTION_MACRO_CUSTOM_METRICS, [] );
+		if ( ! is_array( $raw ) ) {
+			return [];
+		}
+		$out = [];
+		foreach ( $raw as $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$slug = sanitize_key( (string) ( $row['slug'] ?? '' ) );
+			$op   = sanitize_key( (string) ( $row['op'] ?? '' ) );
+			if ( $slug === '' || strlen( $slug ) > 96 || $op === '' ) {
+				continue;
+			}
+			$out[] = array(
+				'slug'   => $slug,
+				'op'     => $op,
+				'key_a'  => sanitize_key( (string) ( $row['key_a'] ?? '' ) ),
+				'key_b'  => sanitize_key( (string) ( $row['key_b'] ?? '' ) ),
+				'const'  => isset( $row['const'] ) && is_numeric( $row['const'] ) ? (float) $row['const'] : 0.0,
+			);
+		}
+		return $out;
+	}
+
+	/**
+	 * Итоговые ключи пользовательских параметров для списков и матрицы.
+	 *
+	 * @return list<string>
+	 */
+	public static function get_macro_custom_metric_slugs(): array {
+		$out = array();
+		foreach ( self::get_macro_custom_metrics() as $row ) {
+			if ( ! empty( $row['slug'] ) ) {
+				$out[] = (string) $row['slug'];
+			}
+		}
+		return array_values( array_unique( $out ) );
+	}
+
+	/**
+	 * Слаги из POST при сохранении «Эргономичность», чтобы матрица и критерии не отбрасывали новый ключ в том же запросе.
+	 *
+	 * @return list<string>
+	 */
+	public static function get_macro_custom_metric_slugs_effective(): array {
+		if ( is_admin() && isset( $_POST['option_page'] ) && (string) wp_unslash( $_POST['option_page'] ) === 'wsergo_settings'
+			&& isset( $_POST[ self::OPTION_MACRO_CUSTOM_METRICS ] ) && is_array( $_POST[ self::OPTION_MACRO_CUSTOM_METRICS ] ) ) {
+			$slugs = array();
+			foreach ( wp_unslash( $_POST[ self::OPTION_MACRO_CUSTOM_METRICS ] ) as $row ) {
+				if ( ! is_array( $row ) ) {
+					continue;
+				}
+				$s = sanitize_key( (string) ( $row['slug'] ?? '' ) );
+				if ( $s !== '' ) {
+					$slugs[] = $s;
+				}
+			}
+			return array_values( array_unique( $slugs ) );
+		}
+		return self::get_macro_custom_metric_slugs();
+	}
+
+	/**
+	 * Начальная подпись для пользовательского показателя (можно отредактировать в таблице подписей).
+	 */
+	public static function default_ru_label_for_custom_metric_slug( string $slug ): string {
+		$slug = sanitize_key( $slug );
+		if ( $slug === '' ) {
+			return '';
+		}
+		$readable = str_replace( '_', ' ', $slug );
+		return sprintf(
+			/* translators: %s: technical metric key (latin snake_case). */
+			__( 'Пользовательский параметр: %s', 'worldstat-ergonomics' ),
+			$readable
 		);
 	}
 
@@ -351,7 +460,7 @@ class WSErgo_Settings {
 		$out = [];
 		foreach ( preg_split( '/\r\n|\n|\r/', $raw ) as $line ) {
 			$k = sanitize_key( trim( (string) $line ) );
-			if ( $k !== '' && strlen( $k ) <= 64 ) {
+			if ( $k !== '' && strlen( $k ) <= 96 ) {
 				$out[] = $k;
 			}
 			if ( count( $out ) >= 50 ) {
@@ -403,7 +512,274 @@ class WSErgo_Settings {
 	}
 
 	/**
-	 * Итоговые слагаемые по каждой макро-оси (из опции или встроенные по умолчанию).
+	 * Сохранённые подписи key → русский текст (только непустые переопределения).
+	 *
+	 * @return array<string, string>
+	 */
+	public static function get_data_labels_ru(): array {
+		$raw = get_option( self::OPTION_DATA_LABELS_RU, [] );
+		if ( ! is_array( $raw ) ) {
+			return [];
+		}
+		$out = [];
+		foreach ( $raw as $k => $v ) {
+			$key = sanitize_key( (string) $k );
+			if ( $key === '' || strlen( $key ) > 96 ) {
+				continue;
+			}
+			$text = sanitize_text_field( (string) $v );
+			if ( $text !== '' ) {
+				$out[ $key ] = $text;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * @return array<string, array<string, true>> сигнал → список осей с отметкой
+	 */
+	public static function get_macro_criteria_matrix(): array {
+		$raw = get_option( self::OPTION_MACRO_CRITERIA_MATRIX, [] );
+		if ( ! is_array( $raw ) || ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			return [];
+		}
+		$allow = array_flip( WSErgo_Country_Macro_Calculator::macro_signal_allowlist() );
+		$axes  = [ 'F', 'Cm', 'H', 'A', 'S', 'Ct' ];
+		$out   = [];
+		foreach ( $raw as $sig => $row ) {
+			$k = sanitize_key( (string) $sig );
+			if ( $k === '' || ! isset( $allow[ $k ] ) ) {
+				continue;
+			}
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			foreach ( $axes as $ax ) {
+				if ( ! empty( $row[ $ax ] ) ) {
+					if ( ! isset( $out[ $k ] ) ) {
+						$out[ $k ] = [];
+					}
+					$out[ $k ][ $ax ] = true;
+				}
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * @return array<string, array<string, float>> сигнал → ось → вес (как ввёл пользователь, до нормализации)
+	 */
+	public static function get_macro_criteria_weights(): array {
+		$raw = get_option( self::OPTION_MACRO_CRITERIA_WEIGHTS, [] );
+		if ( ! is_array( $raw ) || ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			return [];
+		}
+		$allow = array_flip( WSErgo_Country_Macro_Calculator::macro_signal_allowlist() );
+		$axes  = [ 'F', 'Cm', 'H', 'A', 'S', 'Ct' ];
+		$out   = [];
+		foreach ( $raw as $sig => $row ) {
+			$k = sanitize_key( (string) $sig );
+			if ( $k === '' || ! isset( $allow[ $k ] ) ) {
+				continue;
+			}
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			foreach ( $axes as $ax ) {
+				if ( ! isset( $row[ $ax ] ) ) {
+					continue;
+				}
+				$w = (float) str_replace( ',', '.', trim( (string) $row[ $ax ] ) );
+				if ( $w < 0 ) {
+					$w = 0.0;
+				}
+				if ( ! isset( $out[ $k ] ) ) {
+					$out[ $k ] = [];
+				}
+				$out[ $k ][ $ax ] = $w;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Сохранённые инверсии (только явно заданные в настройках).
+	 *
+	 * @return array<string, array<string, bool>>
+	 */
+	public static function get_macro_criteria_inverts(): array {
+		$raw = get_option( self::OPTION_MACRO_CRITERIA_INVERTS, [] );
+		if ( ! is_array( $raw ) || ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			return [];
+		}
+		$allow = array_flip( WSErgo_Country_Macro_Calculator::macro_signal_allowlist() );
+		$axes  = [ 'F', 'Cm', 'H', 'A', 'S', 'Ct' ];
+		$out   = [];
+		foreach ( $raw as $sig => $row ) {
+			$k = sanitize_key( (string) $sig );
+			if ( $k === '' || ! isset( $allow[ $k ] ) ) {
+				continue;
+			}
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			foreach ( $axes as $ax ) {
+				if ( ! array_key_exists( $ax, $row ) ) {
+					continue;
+				}
+				if ( ! isset( $out[ $k ] ) ) {
+					$out[ $k ] = [];
+				}
+				$out[ $k ][ $ax ] = filter_var( $row[ $ax ], FILTER_VALIDATE_BOOLEAN );
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Инверсия по умолчанию для пары ось+признак (как во встроенной методике).
+	 *
+	 * @param array<string, list<array{signal:string, invert:bool, weight:float}>> $def
+	 */
+	private static function default_invert_for_axis_signal( string $axis, string $signal, array $def ): bool {
+		$signal = sanitize_key( $signal );
+		foreach ( $def[ $axis ] ?? [] as $row ) {
+			if ( (string) ( $row['signal'] ?? '' ) === $signal ) {
+				return ! empty( $row['invert'] );
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Инверсия слагаемого: из настроек или из встроенной методики.
+	 *
+	 * @param array<string, array<string, bool>> $inv_opt
+	 * @param array<string, list<array{signal:string, invert:bool, weight:float}>> $def
+	 */
+	private static function resolve_matrix_invert( string $axis, string $signal, array $inv_opt, array $def ): bool {
+		$signal = sanitize_key( $signal );
+		if ( isset( $inv_opt[ $signal ] ) && is_array( $inv_opt[ $signal ] ) && array_key_exists( $axis, $inv_opt[ $signal ] ) ) {
+			return (bool) $inv_opt[ $signal ][ $axis ];
+		}
+		return self::default_invert_for_axis_signal( $axis, $signal, $def );
+	}
+
+	/**
+	 * Слагаемые по матрице: ручные веса (доли от 1) и остаток поровну на «авто»; инверсия из настроек или методики.
+	 * Для оси без отметок подставляется встроенная методика по умолчанию.
+	 *
+	 * @return array<string, list<array{signal:string, invert:bool, weight:float}>>
+	 */
+	public static function build_axis_terms_from_criteria_matrix(): array {
+		if ( ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			return [];
+		}
+		$def       = WSErgo_Country_Macro_Calculator::default_macro_axis_terms();
+		$matrix    = self::get_macro_criteria_matrix();
+		$w_opt     = self::get_macro_criteria_weights();
+		$inv_opt   = self::get_macro_criteria_inverts();
+		$axes      = [ 'F', 'Cm', 'H', 'A', 'S', 'Ct' ];
+		$out       = [];
+		foreach ( $axes as $ax ) {
+			$checked = [];
+			foreach ( $matrix as $sig => $axm ) {
+				if ( isset( $axm[ $ax ] ) && $axm[ $ax ] ) {
+					$checked[] = $sig;
+				}
+			}
+			sort( $checked, SORT_STRING );
+			$n = count( $checked );
+			if ( $n === 0 ) {
+				$out[ $ax ] = $def[ $ax ] ?? [];
+				continue;
+			}
+			$manual_vals = [];
+			$auto_sigs   = [];
+			foreach ( $checked as $sig ) {
+				$rw = $w_opt[ $sig ][ $ax ] ?? null;
+				if ( $rw !== null && $rw > 0 ) {
+					$manual_vals[ $sig ] = (float) $rw;
+				} else {
+					$auto_sigs[] = $sig;
+				}
+			}
+			$sum_m   = array_sum( $manual_vals );
+			$n_auto  = count( $auto_sigs );
+			$n_man   = count( $manual_vals );
+			$rows    = [];
+
+			if ( $n_man === 0 ) {
+				$eq = $n > 0 ? 1.0 / $n : 0.0;
+				foreach ( $checked as $sig ) {
+					$rows[] = [
+						'signal' => $sig,
+						'invert' => self::resolve_matrix_invert( $ax, $sig, $inv_opt, $def ),
+						'weight' => $eq,
+					];
+				}
+			} elseif ( $n_auto === 0 ) {
+				if ( $sum_m <= 1e-15 ) {
+					$eq = 1.0 / $n;
+					foreach ( $checked as $sig ) {
+						$rows[] = [
+							'signal' => $sig,
+							'invert' => self::resolve_matrix_invert( $ax, $sig, $inv_opt, $def ),
+							'weight' => $eq,
+						];
+					}
+				} elseif ( $sum_m > 1.0 + 1e-9 ) {
+					foreach ( $manual_vals as $sig => $v ) {
+						$rows[] = [
+							'signal' => $sig,
+							'invert' => self::resolve_matrix_invert( $ax, $sig, $inv_opt, $def ),
+							'weight' => $v / $sum_m,
+						];
+					}
+				} else {
+					$rem = 1.0 - $sum_m;
+					$each = $n_man > 0 ? $rem / $n_man : 0.0;
+					foreach ( $manual_vals as $sig => $v ) {
+						$rows[] = [
+							'signal' => $sig,
+							'invert' => self::resolve_matrix_invert( $ax, $sig, $inv_opt, $def ),
+							'weight' => $v + $each,
+						];
+					}
+				}
+			} elseif ( $sum_m > 1.0 + 1e-9 ) {
+				foreach ( $checked as $sig ) {
+					if ( isset( $manual_vals[ $sig ] ) ) {
+						$wt = $manual_vals[ $sig ] / $sum_m;
+					} else {
+						$wt = 0.0;
+					}
+					$rows[] = [
+						'signal' => $sig,
+						'invert' => self::resolve_matrix_invert( $ax, $sig, $inv_opt, $def ),
+						'weight' => $wt,
+					];
+				}
+			} else {
+				$rem    = max( 0.0, 1.0 - $sum_m );
+				$each_a = $n_auto > 0 ? $rem / $n_auto : 0.0;
+				foreach ( $checked as $sig ) {
+					$w_sig = isset( $manual_vals[ $sig ] ) ? $manual_vals[ $sig ] : $each_a;
+					$rows[] = [
+						'signal' => $sig,
+						'invert' => self::resolve_matrix_invert( $ax, $sig, $inv_opt, $def ),
+						'weight' => $w_sig,
+					];
+				}
+			}
+
+			$out[ $ax ] = $rows;
+		}
+		return $out;
+	}
+
+	/**
+	 * Итоговые слагаемые по каждой макро-оси: матрица «Данные» + веса; при отсутствии отметок по оси — встроенная методика.
 	 *
 	 * @return array<string, list<array{signal:string, invert:bool, weight:float}>>
 	 */
@@ -411,22 +787,7 @@ class WSErgo_Settings {
 		if ( ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
 			return [];
 		}
-		$def  = WSErgo_Country_Macro_Calculator::default_macro_axis_terms();
-		$axes = array( 'F', 'Cm', 'H', 'A', 'S', 'Ct' );
-		$raw  = get_option( self::OPTION_MACRO_AXIS_TERMS, [] );
-		if ( ! is_array( $raw ) ) {
-			$raw = [];
-		}
-		$out = array();
-		foreach ( $axes as $ax ) {
-			if ( isset( $raw[ $ax ] ) && is_array( $raw[ $ax ] ) && count( $raw[ $ax ] ) > 0 ) {
-				$san = self::sanitize_macro_axis_terms_rows( $raw[ $ax ] );
-				$out[ $ax ] = count( $san ) > 0 ? $san : ( $def[ $ax ] ?? array() );
-			} else {
-				$out[ $ax ] = $def[ $ax ] ?? array();
-			}
-		}
-		return $out;
+		return self::build_axis_terms_from_criteria_matrix();
 	}
 
 	/**
