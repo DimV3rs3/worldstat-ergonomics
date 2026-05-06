@@ -471,7 +471,10 @@ class WSErgo_Admin {
 		if ( ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
 			return [];
 		}
-		if ( ! is_array( $input ) ) {
+		// Нет ключа в POST (все чекбоксы сняты) — не подставляем старые значения из БД.
+		if ( null === $input || false === $input || '' === $input ) {
+			$input = [];
+		} elseif ( ! is_array( $input ) ) {
 			$stored = get_option( WSErgo_Settings::OPTION_MACRO_CLUSTER_FEATURES, null );
 			$input  = is_array( $stored ) ? $stored : [];
 		}
@@ -521,7 +524,9 @@ class WSErgo_Admin {
 		if ( ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
 			return [];
 		}
-		if ( ! is_array( $input ) ) {
+		if ( null === $input || false === $input || '' === $input ) {
+			$input = [];
+		} elseif ( ! is_array( $input ) ) {
 			$stored = get_option( WSErgo_Settings::OPTION_MACRO_CRITERIA_MATRIX, [] );
 			$input  = is_array( $stored ) ? $stored : [];
 		}
@@ -600,7 +605,9 @@ class WSErgo_Admin {
 		if ( ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
 			return [];
 		}
-		if ( ! is_array( $input ) ) {
+		if ( null === $input || false === $input || '' === $input ) {
+			$input = [];
+		} elseif ( ! is_array( $input ) ) {
 			$stored = get_option( WSErgo_Settings::OPTION_MACRO_CRITERIA_INVERTS, [] );
 			$input  = is_array( $stored ) ? $stored : [];
 		}
@@ -2015,17 +2022,17 @@ class WSErgo_Admin {
 						'Ct' => __( 'Упр.', 'worldstat-ergonomics' ),
 					];
 					?>
-					<div style="max-height:420px;overflow:auto;border:1px solid #c3c4c7;background:#fff;margin-bottom:12px;">
-						<table class="widefat striped" style="margin:0;min-width:680px;">
+					<div class="wsergo-macro-matrix-wrap" style="max-height:420px;overflow:auto;border:1px solid #c3c4c7;background:#fff;margin-bottom:12px;">
+						<table class="widefat striped wsergo-macro-matrix-table" style="margin:0;min-width:680px;border-collapse:separate;border-spacing:0;">
 							<thead>
 								<tr>
-									<th scope="col" style="min-width:220px;"><?php esc_html_e( 'Параметр', 'worldstat-ergonomics' ); ?></th>
+									<th scope="col" class="wsergo-macro-matrix-sticky-corner" style="min-width:220px;"><?php esc_html_e( 'Параметр', 'worldstat-ergonomics' ); ?></th>
 									<?php foreach ( $macro_axes_six as $axk ) : ?>
 										<?php
 										$th_short = isset( $matrix_col_short[ $axk ] ) ? $matrix_col_short[ $axk ] : $axk;
 										$th_full  = isset( $macro_axis_labels[ $axk ] ) ? $macro_axis_labels[ $axk ] : $axk;
 										?>
-										<th scope="col" style="text-align:center;min-width:52px;padding:8px 4px;" title="<?php echo esc_attr( $th_full ); ?>">
+										<th scope="col" class="wsergo-macro-matrix-sticky-head" style="text-align:center;min-width:52px;padding:8px 4px;" title="<?php echo esc_attr( $th_full ); ?>">
 											<span class="description"><?php echo esc_html( $th_short ); ?></span>
 											<br /><code style="font-size:10px;"><?php echo esc_html( $axk ); ?></code>
 										</th>
@@ -2035,7 +2042,7 @@ class WSErgo_Admin {
 							<tbody>
 								<?php foreach ( $signals_ui as $msig ) : ?>
 								<tr>
-									<td>
+									<td class="wsergo-macro-matrix-sticky-firstcol">
 										<?php if ( isset( $wsergo_custom_slugs_flip[ $msig ] ) ) : ?>
 											<?php
 											$wsergo_cm_del_url = wp_nonce_url(

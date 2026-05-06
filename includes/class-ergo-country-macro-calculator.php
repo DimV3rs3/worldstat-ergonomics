@@ -722,12 +722,17 @@ class WSErgo_Country_Macro_Calculator {
 	}
 
 	/**
-	 * Признаки k-means: из настроек или встроенный список.
+	 * Признаки k-means: из настроек (≥2 отмеченных) или встроенный список.
 	 *
 	 * @return list<string>
 	 */
 	private static function get_effective_cluster_features(): array {
-		// Для актуальной методики используем фиксированный кластерный вектор из calculates.txt.
+		if ( class_exists( 'WSErgo_Settings' ) ) {
+			$saved = WSErgo_Settings::get_macro_cluster_features();
+			if ( count( $saved ) >= 2 ) {
+				return $saved;
+			}
+		}
 		return self::CLUSTER_FEATURES;
 	}
 
