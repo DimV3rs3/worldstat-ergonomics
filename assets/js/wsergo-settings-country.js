@@ -1,6 +1,5 @@
 /**
- * Калькулятор пользовательских макропараметров (вкладка «Данные»).
- * Сохранение через AJAX — не зависит от лимита PHP max_input_vars на большой форме.
+ * Калькулятор пользовательских макропараметров (вкладки «Данные» страна и город).
  */
 (function ($) {
 	'use strict';
@@ -10,28 +9,40 @@
 		return s.replace(/[^a-z0-9_-]/g, '').replace(/-/g, '_');
 	}
 
-	function toggleConstUi() {
-		var op = $('#wsergo-cm-op').val() || '';
-		var sc = op === 'scale_mul' || op === 'scale_add';
-		$('#wsergo-cm-wrap-const').toggle(sc);
-		$('#wsergo-cm-wrap-b').toggle(!sc);
-	}
-
-	function bindCustomMetricCalculator() {
-		var $btn = $('#wsergo-cm-add');
-		var $store = $('#wsergo-cm-store');
+	function bindCustomMetricCalculator(cfg, ids) {
+		cfg = cfg || {};
+		ids = ids || {};
+		var btnSel = ids.btn || '#wsergo-cm-add';
+		var storeSel = ids.store || '#wsergo-cm-store';
+		var $btn = $(btnSel);
+		var $store = $(storeSel);
 		if (!$btn.length || !$store.length) {
 			return;
 		}
 
-		var cfg = window.wsergoCmSettings || {};
 		var maxR = typeof cfg.maxRules === 'number' ? cfg.maxRules : 30;
 		var msg = cfg.messages || {};
+		var opSel = ids.op || '#wsergo-cm-op';
+		var wrapConstSel = ids.wrapConst || '#wsergo-cm-wrap-const';
+		var wrapBSel = ids.wrapB || '#wsergo-cm-wrap-b';
+		var keyASel = ids.keyA || '#wsergo-cm-key-a';
+		var keyBSel = ids.keyB || '#wsergo-cm-key-b';
+		var slugSel = ids.slug || '#wsergo-cm-slug';
+		var constSel = ids.constInp || '#wsergo-cm-const';
+		var scrollTabId = ids.scrollTabId || 'tab-data';
+		var sessionKey = ids.sessionKey || 'wsergo_scroll_tab_data';
+
+		function toggleConstUi() {
+			var op = $(opSel).val() || '';
+			var sc = op === 'scale_mul' || op === 'scale_add';
+			$(wrapConstSel).toggle(sc);
+			$(wrapBSel).toggle(!sc);
+		}
 
 		toggleConstUi();
-		$('#wsergo-cm-op').on('change', toggleConstUi);
+		$(opSel).on('change', toggleConstUi);
 
-		$btn.on('click', function (e) {
+		$btn.off('click.wsergoCmCalc').on('click.wsergoCmCalc', function (e) {
 			e.preventDefault();
 
 			if ($store.find('.wsergo-cm-row').length >= maxR) {
@@ -39,11 +50,11 @@
 				return;
 			}
 
-			var op = $('#wsergo-cm-op').val() || '';
-			var ka = sanitizeKey($('#wsergo-cm-key-a').val());
-			var kb = sanitizeKey($('#wsergo-cm-key-b').val());
-			var slug = sanitizeKey($('#wsergo-cm-slug').val());
-			var cRaw = String($('#wsergo-cm-const').val() || '0')
+			var op = $(opSel).val() || '';
+			var ka = sanitizeKey($(keyASel).val());
+			var kb = sanitizeKey($(keyBSel).val());
+			var slug = sanitizeKey($(slugSel).val());
+			var cRaw = String($(constSel).val() || '0')
 				.trim()
 				.replace(',', '.');
 			var cNum = parseFloat(cRaw);
@@ -80,10 +91,10 @@
 			}
 
 			var ajaxUrl =
-				typeof window.ajaxurl === 'string' && window.ajaxurl
-					? window.ajaxurl
-					: typeof cfg.ajaxUrl === 'string'
-						? cfg.ajaxUrl
+				typeof cfg.ajaxUrl === 'string' && cfg.ajaxUrl
+					? cfg.ajaxUrl
+					: typeof window.ajaxurl === 'string' && window.ajaxurl
+						? window.ajaxurl
 						: '';
 			var nonce = cfg.nonceAppend || '';
 			var action = cfg.ajaxAction || 'wsergo_append_custom_metric';
@@ -103,18 +114,21 @@
 
 			$btn.prop('disabled', true);
 
-			$.post(ajaxUrl, {
-				action: action,
-				nonce: nonce,
-				rule: rule,
-			})
+			jQuery
+				.ajax({
+					url: ajaxUrl,
+					type: 'POST',
+					dataType: 'json',
+					data: {
+						action: action,
+						nonce: nonce,
+						rule: rule,
+					},
+				})
 				.done(function (r) {
 					if (r && r.success) {
 						try {
-							sessionStorage.setItem(
-								'wsergo_scroll_tab_data',
-								'1'
-							);
+							sessionStorage.setItem(sessionKey, '1');
 						} catch (err) {}
 						window.location.reload();
 						return;
@@ -126,25 +140,51 @@
 							(typeof r.data === 'string' ? r.data : ''));
 					window.alert(errMsg || msg.ajaxFail || '');
 				})
-				.fail(function () {
-					window.alert(msg.ajaxFail || '');
+				.fail(function (xhr, status) {
+					var extra = '';
+					if (xhr && xhr.responseText && status === 'parsererror') {
+						extra = String(xhr.responseText).slice(0, 200);
+					}
+					window.alert((msg.ajaxFail || '') + (extra ? '\n' + extra : ''));
 				})
 				.always(function () {
 					$btn.prop('disabled', false);
 				});
 		});
-	}
 
-	$(function () {
-		bindCustomMetricCalculator();
 		try {
-			if (sessionStorage.getItem('wsergo_scroll_tab_data') === '1') {
-				sessionStorage.removeItem('wsergo_scroll_tab_data');
-				var el = document.getElementById('tab-data');
+			if (sessionStorage.getItem(sessionKey) === '1') {
+				sessionStorage.removeItem(sessionKey);
+				var el = document.getElementById(scrollTabId);
 				if (el && el.scrollIntoView) {
 					el.scrollIntoView({ block: 'start' });
 				}
 			}
 		} catch (err) {}
+	}
+
+	$(function () {
+		bindCustomMetricCalculator(window.wsergoCmSettings || {}, {});
+		var base = window.wsergoCmSettings || {};
+		var cityBlock = base.city;
+		var cityCfg =
+			cityBlock && typeof cityBlock === 'object'
+				? $.extend({}, base, cityBlock)
+				: null;
+		if (cityCfg && cityCfg.ajaxAction) {
+			bindCustomMetricCalculator(cityCfg, {
+				btn: '#wsergo-cm-add-city',
+				store: '#wsergo-cm-store-city',
+				op: '#wsergo-cm-op-city',
+				wrapConst: '#wsergo-cm-wrap-const-city',
+				wrapB: '#wsergo-cm-wrap-b-city',
+				keyA: '#wsergo-cm-key-a-city',
+				keyB: '#wsergo-cm-key-b-city',
+				slug: '#wsergo-cm-slug-city',
+				constInp: '#wsergo-cm-const-city',
+				scrollTabId: 'tab-city-data',
+				sessionKey: 'wsergo_scroll_tab_city_data',
+			});
+		}
 	});
 })(jQuery);

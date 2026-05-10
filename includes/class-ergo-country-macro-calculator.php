@@ -18,8 +18,17 @@ class WSErgo_Country_Macro_Calculator {
 	/** Новый ключ — старый кэш без diag/raw_rows больше не читается (избегает фаталов при несовпадении формата). */
 	private const TRANSIENT_KEY = 'wsergo_macro_scores_bundle_v11';
 
+	/** Кэш макро-E по настройкам вкладки «Эргономичность города» (другой год/k/оси/веса). */
+	private const TRANSIENT_KEY_CITY = 'wsergo_macro_city_scores_bundle_v1';
+
 	/** Инкремент при изменении логики расчёта — сбрасывает устаревший transient без смены CSV. */
 	private const SCORE_BUNDLE_LOGIC = 23;
+
+	/** Версия логики city-bundle (отдельно от странового свода). */
+	private const CITY_SCORE_BUNDLE_LOGIC = 2;
+
+	/** @var array<string, mixed>|null */
+	private static ?array $runtime_city_bundle = null;
 
 	/** @var array<string, string>|null ISO2 => ISO3 из data/countries.json платформы */
 	private static $iso2_to_iso3_file_cache = null;
@@ -99,8 +108,10 @@ class WSErgo_Country_Macro_Calculator {
 
 	public static function flush_cache(): void {
 		delete_transient( self::TRANSIENT_KEY );
+		delete_transient( self::TRANSIENT_KEY_CITY );
 		delete_transient( 'wsergo_macro_scores_bundle' );
 		self::$runtime_full_bundle = null;
+		self::$runtime_city_bundle  = null;
 	}
 
 	/**
@@ -219,6 +230,7 @@ class WSErgo_Country_Macro_Calculator {
 		if ( class_exists( 'WSErgo_Settings' ) ) {
 			$merged = array_merge( $merged, WSErgo_Settings::get_macro_extra_signals_effective() );
 			$merged = array_merge( $merged, WSErgo_Settings::get_macro_custom_metric_slugs_effective() );
+			$merged = array_merge( $merged, WSErgo_Settings::get_macro_custom_metric_slugs() );
 		}
 		$has_uploaded = self::has_macro_csv_data_sources();
 		if ( $has_uploaded && class_exists( 'WorldStat_Uploaded_Csv' ) ) {
@@ -342,6 +354,122 @@ class WSErgo_Country_Macro_Calculator {
 		set_transient( self::TRANSIENT_KEY, $full, HOUR_IN_SECONDS * 6 );
 		self::$runtime_full_bundle = $full;
 		return self::$runtime_full_bundle;
+	}
+
+	/**
+	 * Полный кэш макрорасчёта по настройкам «Эргономичность города» (опорный год города, свои k и оси).
+	 *
+	 * @return array{y:int,r:int,lv:int,ch:string,scores:array,diag:array<string,array<string,mixed>>,raw_rows:array<string,array<string,float>>}
+	 */
+	public static function get_city_full_bundle(): array {
+		if ( self::$runtime_city_bundle !== null ) {
+			return self::$runtime_city_bundle;
+		}
+		$defaults = array(
+			'y'        => 0,
+			'r'        => 0,
+			'lv'       => self::CITY_SCORE_BUNDLE_LOGIC,
+			'ch'       => '',
+			'scores'   => array(),
+			'diag'     => array(),
+			'raw_rows' => array(),
+		);
+		if ( ! class_exists( 'WSErgo_Settings' ) ) {
+			return $defaults;
+		}
+		$year = WSErgo_Settings::get_city_macro_reference_year();
+		$rev  = (int) get_option( 'wsp_csv_files_revision', 0 );
+		$ch   = WSErgo_Settings::city_macro_config_hash();
+		$bund = get_transient( self::TRANSIENT_KEY_CITY );
+		if (
+			is_array( $bund )
+			&& isset( $bund['y'], $bund['r'], $bund['lv'], $bund['scores'], $bund['diag'], $bund['raw_rows'] )
+			&& (int) $bund['y'] === $year
+			&& (int) $bund['r'] === $rev
+			&& (int) $bund['lv'] === self::CITY_SCORE_BUNDLE_LOGIC
+			&& (string) ( $bund['ch'] ?? '' ) === $ch
+			&& is_array( $bund['scores'] )
+			&& is_array( $bund['diag'] )
+			&& is_array( $bund['raw_rows'] )
+		) {
+			self::$runtime_city_bundle = array(
+				'y'        => (int) $bund['y'],
+				'r'        => (int) $bund['r'],
+				'lv'       => (int) $bund['lv'],
+				'ch'       => (string) ( $bund['ch'] ?? '' ),
+				'scores'   => $bund['scores'],
+				'diag'     => $bund['diag'],
+				'raw_rows' => $bund['raw_rows'],
+			);
+			return self::$runtime_city_bundle;
+		}
+		$full = self::compute_full_bundle_city( $year );
+		if ( ! is_array( $full ) ) {
+			$full = array();
+		}
+		$full['y']        = $year;
+		$full['r']        = $rev;
+		$full['lv']       = self::CITY_SCORE_BUNDLE_LOGIC;
+		$full['ch']       = WSErgo_Settings::city_macro_config_hash();
+		$full['scores']   = isset( $full['scores'] ) && is_array( $full['scores'] ) ? $full['scores'] : array();
+		$full['diag']     = isset( $full['diag'] ) && is_array( $full['diag'] ) ? $full['diag'] : array();
+		$full['raw_rows'] = isset( $full['raw_rows'] ) && is_array( $full['raw_rows'] ) ? $full['raw_rows'] : array();
+		set_transient( self::TRANSIENT_KEY_CITY, $full, HOUR_IN_SECONDS * 6 );
+		self::$runtime_city_bundle = $full;
+		return self::$runtime_city_bundle;
+	}
+
+	/**
+	 * Макро-E и сырой ряд по настройкам вкладки «Эргономичность города» (для строки страны в CSV).
+	 *
+	 * @return array{iso3:string,iso2:string,year:int,scores:?array,diagnostics:array<string,mixed>,raw_row:?array<string,float>,axis_terms:array,e_axis_weights:array}|null
+	 */
+	public static function get_city_macro_detail( string $iso2 ): ?array {
+		if ( ! class_exists( 'WSErgo_Settings' ) || WSErgo_Settings::get_country_index_source() !== 'macro_datasets' ) {
+			return null;
+		}
+		$iso2 = strtoupper( sanitize_text_field( $iso2 ) );
+		if ( strlen( $iso2 ) !== 2 ) {
+			return null;
+		}
+		$iso3 = self::iso2_to_iso3( $iso2 );
+		if ( strlen( $iso3 ) !== 3 ) {
+			return null;
+		}
+		$bundle = self::get_city_full_bundle();
+		$y      = (int) ( $bundle['y'] ?? WSErgo_Settings::get_city_macro_reference_year() );
+		$scores = ( isset( $bundle['scores'] ) && is_array( $bundle['scores'] ) ) ? $bundle['scores'] : array();
+		$diags  = ( isset( $bundle['diag'] ) && is_array( $bundle['diag'] ) ) ? $bundle['diag'] : array();
+		$raws   = ( isset( $bundle['raw_rows'] ) && is_array( $bundle['raw_rows'] ) ) ? $bundle['raw_rows'] : array();
+		$axis_terms = WSErgo_Settings::get_city_macro_axis_terms_resolved();
+		if ( ! is_array( $axis_terms ) || empty( $axis_terms ) ) {
+			$axis_terms = self::default_macro_axis_terms();
+		}
+		$e_w = WSErgo_Settings::get_city_macro_e_axis_weights();
+
+		$row_scores = isset( $scores[ $iso3 ] ) && is_array( $scores[ $iso3 ] ) ? $scores[ $iso3 ] : null;
+		if ( is_array( $row_scores ) ) {
+			foreach ( array( 'E', 'F', 'Cm', 'H', 'A', 'S', 'Ct' ) as $axis_key ) {
+				if ( ! array_key_exists( $axis_key, $row_scores ) ) {
+					continue;
+				}
+				$rv = $row_scores[ $axis_key ];
+				if ( is_numeric( $rv ) ) {
+					$row_scores[ $axis_key ] = (float) $rv;
+				}
+			}
+		}
+
+		return array(
+			'iso3'           => $iso3,
+			'iso2'           => $iso2,
+			'year'           => $y,
+			'scores'         => $row_scores,
+			'diagnostics'    => isset( $diags[ $iso3 ] ) && is_array( $diags[ $iso3 ] ) ? $diags[ $iso3 ] : array(),
+			'raw_row'        => isset( $raws[ $iso3 ] ) && is_array( $raws[ $iso3 ] ) ? $raws[ $iso3 ] : null,
+			'axis_terms'     => is_array( $axis_terms ) ? $axis_terms : array(),
+			'e_axis_weights' => is_array( $e_w ) ? $e_w : array(),
+		);
 	}
 
 	/**
@@ -774,6 +902,111 @@ class WSErgo_Country_Macro_Calculator {
 	}
 
 	/**
+	 * @return list<string>
+	 */
+	private static function get_city_effective_cluster_features(): array {
+		if ( class_exists( 'WSErgo_Settings' ) ) {
+			$saved = WSErgo_Settings::get_city_macro_cluster_features();
+			if ( count( $saved ) >= 2 ) {
+				return $saved;
+			}
+		}
+		return self::CLUSTER_FEATURES;
+	}
+
+	/**
+	 * @return array<string, list<array{signal:string, invert:bool, weight:float}>>
+	 */
+	private static function get_city_effective_macro_axis_terms(): array {
+		if ( class_exists( 'WSErgo_Settings' ) ) {
+			$res = WSErgo_Settings::get_city_macro_axis_terms_resolved();
+			if ( is_array( $res ) && ! empty( $res ) ) {
+				return $res;
+			}
+		}
+		return self::default_macro_axis_terms();
+	}
+
+	private static function collect_normalization_columns_city(): array {
+		$cols       = self::NORMALIZE_WITHIN_CLUSTER;
+		$axis_terms = self::get_city_effective_macro_axis_terms();
+		foreach ( $axis_terms as $rows ) {
+			foreach ( $rows as $row ) {
+				$sig = sanitize_key( (string) ( $row['signal'] ?? '' ) );
+				if ( $sig !== '' ) {
+					$cols[] = $sig;
+				}
+			}
+		}
+		foreach ( self::get_city_effective_cluster_features() as $cf ) {
+			$cols[] = $cf;
+		}
+		return array_values( array_unique( $cols ) );
+	}
+
+	/**
+	 * Производные по формулам вкладки «Эргономичность города».
+	 *
+	 * @param array<string, array<string, float>> $rows
+	 */
+	private static function apply_city_custom_metrics_to_rows( array &$rows ): void {
+		if ( ! class_exists( 'WSErgo_Settings' ) ) {
+			return;
+		}
+		$defs = WSErgo_Settings::get_city_macro_custom_metrics();
+		if ( empty( $defs ) ) {
+			return;
+		}
+		$ops_bin = array( 'add' => true, 'sub' => true, 'mul' => true, 'div' => true );
+		foreach ( $rows as $iso3 => &$row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			foreach ( $defs as $def ) {
+				$slug = isset( $def['slug'] ) ? sanitize_key( (string) $def['slug'] ) : '';
+				$op   = isset( $def['op'] ) ? sanitize_key( (string) $def['op'] ) : '';
+				if ( $slug === '' || $op === '' ) {
+					continue;
+				}
+				$ka = isset( $def['key_a'] ) ? sanitize_key( (string) $def['key_a'] ) : '';
+				$kb = isset( $def['key_b'] ) ? sanitize_key( (string) $def['key_b'] ) : '';
+				$c  = isset( $def['const'] ) && is_numeric( $def['const'] ) ? (float) $def['const'] : 0.0;
+				$va = self::finite_or_nan( isset( $row[ $ka ] ) ? (float) $row[ $ka ] : NAN );
+				$vb = self::finite_or_nan( isset( $row[ $kb ] ) ? (float) $row[ $kb ] : NAN );
+				$res = NAN;
+				if ( isset( $ops_bin[ $op ] ) ) {
+					if ( $ka === '' || $kb === '' ) {
+						continue;
+					}
+					if ( $op === 'add' && is_finite( $va ) && is_finite( $vb ) ) {
+						$res = $va + $vb;
+					} elseif ( $op === 'sub' && is_finite( $va ) && is_finite( $vb ) ) {
+						$res = $va - $vb;
+					} elseif ( $op === 'mul' && is_finite( $va ) && is_finite( $vb ) ) {
+						$res = $va * $vb;
+					} elseif ( $op === 'div' ) {
+						$res = self::safe_div( $va, $vb );
+					}
+				} elseif ( $op === 'scale_mul' ) {
+					if ( $ka === '' || ! is_finite( $va ) ) {
+						continue;
+					}
+					$res = $va * $c;
+				} elseif ( $op === 'scale_add' ) {
+					if ( $ka === '' || ! is_finite( $va ) ) {
+						continue;
+					}
+					$res = $va + $c;
+				} else {
+					continue;
+				}
+				$row[ $slug ] = $res;
+			}
+			unset( $row );
+		}
+	}
+
+	/**
 	 * @param \Closure(string): ?float $g
 	 * @param list<array{signal:string, invert:bool, weight:float}> $term_rows
 	 * @return array{0: list<float>, 1: list<float>}
@@ -931,6 +1164,170 @@ class WSErgo_Country_Macro_Calculator {
 					'Ct' => 0.10,
 				);
 			$E = self::weighted_sum_finite(
+				array( $F, $Cm, $H, $A, $S, $Ct ),
+				array( $ew['F'], $ew['Cm'], $ew['H'], $ew['A'], $ew['S'], $ew['Ct'] )
+			);
+
+			if ( ! isset( $diag[ $iso3 ] ) || ! is_array( $diag[ $iso3 ] ) ) {
+				$diag[ $iso3 ] = array();
+			}
+			$fill = $cluster_median_fill[ $iso3 ] ?? array();
+			if ( ! empty( $fill ) ) {
+				$diag[ $iso3 ]['cluster_median_imputed_features'] = $fill;
+			}
+			$diag[ $iso3 ]['axis_weight_used'] = array(
+				'F'  => self::finite_weight_fraction( $f_vals, $f_w ),
+				'Cm' => self::finite_weight_fraction( $cm_vals, $cm_w ),
+				'H'  => self::finite_weight_fraction( $h_vals, $h_w ),
+				'A'  => self::finite_weight_fraction( $a_vals, $a_w ),
+				'S'  => self::finite_weight_fraction( $s_vals, $s_w ),
+				'Ct' => self::finite_weight_fraction( $ct_vals, $ct_w ),
+			);
+
+			if ( ! is_finite( $E ) || $E <= 0 ) {
+				$diag[ $iso3 ]['index_unavailable'] = true;
+				continue;
+			}
+
+			$out[ $iso3 ] = array(
+				'E'  => $E * 100.0,
+				'F'  => is_finite( $F ) ? $F * 100.0 : 0.0,
+				'Cm' => is_finite( $Cm ) ? $Cm * 100.0 : 0.0,
+				'H'  => is_finite( $H ) ? $H * 100.0 : 0.0,
+				'A'  => is_finite( $A ) ? $A * 100.0 : 0.0,
+				'S'  => is_finite( $S ) ? $S * 100.0 : 0.0,
+				'Ct' => is_finite( $Ct ) ? $Ct * 100.0 : 0.0,
+			);
+		}
+
+		return array(
+			'scores'   => $out,
+			'diag'     => $diag,
+			'raw_rows' => $rows,
+		);
+	}
+
+	/**
+	 * Тот же CSV-пайплайн, что и {@see compute_full_bundle()}, но кластеризация, нормализация, оси F–Ct и веса E — из настроек «Эргономичность города».
+	 *
+	 * @return array{scores:array<string,array<string,float>>,diag:array<string,array<string,mixed>>,raw_rows:array<string,array<string,float>>}
+	 */
+	private static function compute_full_bundle_city( int $target_year ): array {
+		$empty = array(
+			'scores'   => array(),
+			'diag'     => array(),
+			'raw_rows' => array(),
+		);
+		if ( ! class_exists( 'WorldStat_Uploaded_Csv' ) || ! class_exists( 'WSErgo_Settings' ) ) {
+			return $empty;
+		}
+
+		$ingest = self::ingest_uploaded_csvs();
+		$built  = self::build_feature_rows( $ingest, $target_year );
+		if ( ! is_array( $built ) ) {
+			return $empty;
+		}
+		$rows = isset( $built['rows'] ) && is_array( $built['rows'] ) ? $built['rows'] : array();
+		$diag = isset( $built['diagnostics'] ) && is_array( $built['diagnostics'] ) ? $built['diagnostics'] : array();
+		if ( count( $rows ) < 1 ) {
+			return $empty;
+		}
+		self::apply_newdata_derived_metrics_to_rows( $rows );
+		self::apply_user_custom_metrics_to_rows( $rows );
+		self::apply_city_custom_metrics_to_rows( $rows );
+
+		$cluster_feats = self::get_city_effective_cluster_features();
+
+		$medians = array();
+		foreach ( $cluster_feats as $feat ) {
+			$col = array();
+			foreach ( $rows as $r ) {
+				if ( isset( $r[ $feat ] ) && is_finite( (float) $r[ $feat ] ) ) {
+					$col[] = (float) $r[ $feat ];
+				}
+			}
+			$medians[ $feat ] = self::median_floats( $col );
+		}
+
+		$matrix              = array();
+		$keys                = array();
+		$cluster_median_fill = array();
+		foreach ( $rows as $iso3 => $r ) {
+			$vec  = array();
+			$fill = array();
+			foreach ( $cluster_feats as $feat ) {
+				$v = isset( $r[ $feat ] ) ? (float) $r[ $feat ] : NAN;
+				if ( ! is_finite( $v ) ) {
+					$v      = $medians[ $feat ];
+					$fill[] = $feat;
+				}
+				$vec[] = $v;
+			}
+			$keys[]                       = $iso3;
+			$matrix[]                     = $vec;
+			$cluster_median_fill[ $iso3 ] = $fill;
+		}
+
+		if ( count( $matrix ) < 1 ) {
+			return $empty;
+		}
+
+		$scaled = self::standard_scale_rows( $matrix );
+		$k      = min( WSErgo_Settings::get_city_macro_k_clusters(), count( $scaled ) );
+		$labels = self::kmeans( $scaled, $k, 80 );
+
+		$n         = count( $keys );
+		$norm_cols = array();
+		foreach ( self::collect_normalization_columns_city() as $col ) {
+			$vals = array();
+			for ( $i = 0; $i < $n; $i++ ) {
+				$iso3   = $keys[ $i ];
+				$vals[] = isset( $rows[ $iso3 ][ $col ] ) ? (float) $rows[ $iso3 ][ $col ] : NAN;
+			}
+			$norm_cols[ $col ] = self::normalize_within_clusters_1d( $vals, $labels, $k );
+		}
+
+		if ( isset( $norm_cols['sustainable_cities'] ) ) {
+			$norm_cols['sdg11'] = $norm_cols['sustainable_cities'];
+		}
+		if ( isset( $norm_cols['industry_innovation_infrastructure'] ) ) {
+			$norm_cols['sdg9'] = $norm_cols['industry_innovation_infrastructure'];
+		}
+		if ( isset( $norm_cols['peace_justice'] ) ) {
+			$norm_cols['sdg16'] = $norm_cols['peace_justice'];
+		}
+		if ( isset( $norm_cols['sdg_index_score'] ) ) {
+			$norm_cols['sdg_index'] = $norm_cols['sdg_index_score'];
+		}
+
+		$out = array();
+		for ( $i = 0; $i < $n; $i++ ) {
+			$iso3 = $keys[ $i ];
+			$g    = static function ( $name ) use ( $norm_cols, $i ) {
+				if ( ! isset( $norm_cols[ $name ][ $i ] ) ) {
+					return null;
+				}
+				$v = (float) $norm_cols[ $name ][ $i ];
+				return is_finite( $v ) ? $v : null;
+			};
+
+			$axis_terms = self::get_city_effective_macro_axis_terms();
+
+			list( $f_vals, $f_w ) = self::macro_axis_vals_and_weights( $g, $axis_terms['F'] ?? array() );
+			$F                   = self::compute_macro_axis_from_terms( $g, $axis_terms['F'] ?? array() );
+			list( $cm_vals, $cm_w ) = self::macro_axis_vals_and_weights( $g, $axis_terms['Cm'] ?? array() );
+			$Cm                    = self::compute_macro_axis_from_terms( $g, $axis_terms['Cm'] ?? array() );
+			list( $h_vals, $h_w ) = self::macro_axis_vals_and_weights( $g, $axis_terms['H'] ?? array() );
+			$H                   = self::compute_macro_axis_from_terms( $g, $axis_terms['H'] ?? array() );
+			list( $a_vals, $a_w ) = self::macro_axis_vals_and_weights( $g, $axis_terms['A'] ?? array() );
+			$A                   = self::compute_macro_axis_from_terms( $g, $axis_terms['A'] ?? array() );
+			list( $s_vals, $s_w ) = self::macro_axis_vals_and_weights( $g, $axis_terms['S'] ?? array() );
+			$S                   = self::compute_macro_axis_from_terms( $g, $axis_terms['S'] ?? array() );
+			list( $ct_vals, $ct_w ) = self::macro_axis_vals_and_weights( $g, $axis_terms['Ct'] ?? array() );
+			$Ct                    = self::compute_macro_axis_from_terms( $g, $axis_terms['Ct'] ?? array() );
+
+			$ew = WSErgo_Settings::get_city_macro_e_axis_weights();
+			$E  = self::weighted_sum_finite(
 				array( $F, $Cm, $H, $A, $S, $Ct ),
 				array( $ew['F'], $ew['Cm'], $ew['H'], $ew['A'], $ew['S'], $ew['Ct'] )
 			);

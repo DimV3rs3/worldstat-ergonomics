@@ -80,6 +80,11 @@ $sub_vals   = array_map( fn( $v ) => $v > 0 ? $v : 0, $sub_vals );
 			);
 		}
 
+		$wsergo_neural_partial = defined( 'WSERGO_DIR' ) ? WSERGO_DIR . 'templates/partial-district-neural.php' : '';
+		if ( $wsergo_neural_partial && is_readable( $wsergo_neural_partial ) ) {
+			include $wsergo_neural_partial;
+		}
+
 		if ( get_the_content() ) {
 			echo '<div class="wsp-entry-content">';
 			the_content();

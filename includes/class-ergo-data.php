@@ -79,6 +79,134 @@ class WSErgo_Data {
 	}
 
 	/**
+	 * Данные для публичного блока «город — листовые показатели» (карта полей, нормализация, оси, E).
+	 *
+	 * @return array{
+	 *   id:int,
+	 *   name:string,
+	 *   url:string,
+	 *   e:?string,
+	 *   leaf_e:?string,
+	 *   axes:array<string,float>,
+	 *   indicators:list<array{id:string,label:string,source:string,raw:?string,score:?string}>,
+	 *   leaf_notice:string
+	 * }
+	 */
+	public static function get_city_leaf_public_detail( int $city_id ): array {
+		$city_id = (int) $city_id;
+		$name    = $city_id > 0 ? get_the_title( $city_id ) : '';
+		$url     = $city_id > 0 ? (string) get_permalink( $city_id ) : '';
+		$e_val   = self::get_city_ergo_index( $city_id );
+		$e_str   = $e_val !== null && $e_val > 0 ? (string) $e_val : null;
+
+		$out = [
+			'id'           => $city_id,
+			'name'         => $name,
+			'url'          => $url,
+			'e'            => $e_str,
+			'leaf_e'       => null,
+			'axes'         => [],
+			'indicators'   => [],
+			'leaf_notice'  => '',
+		];
+
+		if ( $city_id <= 0 ) {
+			$out['leaf_notice'] = __( 'Город не выбран.', 'worldstat-ergonomics' );
+			return $out;
+		}
+
+		if ( ! class_exists( 'WSErgo_City_Bridge' ) ) {
+			$out['leaf_notice'] = __( 'Модуль городской эргономики недоступен.', 'worldstat-ergonomics' );
+			return $out;
+		}
+
+		if ( ! WSErgo_City_Bridge::is_city_import_ergo_enabled() || empty( WSErgo_City_Bridge::get_field_map() ) ) {
+			$out['leaf_notice'] = __( 'Листовые показатели по карте полей выводятся, если в настройках эргономики включён расчёт по данным импорта и задана карта полей города.', 'worldstat-ergonomics' );
+			return $out;
+		}
+
+		$raw = WSErgo_City_Bridge::collect_raw_for_city( $city_id );
+		$defs_by_id = [];
+		foreach ( WSErgo_Indicators::get_definitions() as $def_row ) {
+			if ( isset( $def_row['id'] ) ) {
+				$defs_by_id[ (string) $def_row['id'] ] = $def_row;
+			}
+		}
+
+		foreach ( WSErgo_City_Bridge::get_field_map() as $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$iid    = isset( $row['indicator_id'] ) ? sanitize_key( (string) $row['indicator_id'] ) : '';
+			$source = isset( $row['source'] ) ? (string) $row['source'] : '';
+			if ( $iid === '' || $source === '' ) {
+				continue;
+			}
+			$def   = $defs_by_id[ $iid ] ?? null;
+			$label = $def ? (string) ( $def['label'] ?? $iid ) : $iid;
+			$rawf  = isset( $raw[ $iid ] ) ? (float) $raw[ $iid ] : null;
+			$score = null;
+			$norm  = null;
+			if ( $def !== null && $rawf !== null && array_key_exists( $iid, $raw ) ) {
+				$norm = WSErgo_Indicators::normalize_to_score( $def, $rawf );
+				$score = $norm !== null ? (string) $norm : null;
+			}
+			$dir = $def ? (string) ( $def['direction'] ?? 'higher_better' ) : 'higher_better';
+			if ( 'lower_better' !== $dir ) {
+				$dir = 'higher_better';
+			}
+			$score_val = ( $norm !== null && is_finite( (float) $norm ) ) ? round( (float) $norm, 4 ) : null;
+			$out['indicators'][] = [
+				'id'           => $iid,
+				'label'        => $label,
+				'source'       => $source,
+				'raw'          => $rawf !== null && array_key_exists( $iid, $raw ) ? self::format_leaf_public_number( $rawf ) : null,
+				'score'        => $score,
+				'score_value'  => $score_val,
+				'direction'    => $dir,
+			];
+		}
+
+		$scores = WSErgo_Indicators::build_dimension_scores_from_raw_map( $raw );
+		foreach ( $scores as $dim => $sv ) {
+			if ( is_numeric( $sv ) ) {
+				$out['axes'][ (string) $dim ] = round( (float) $sv, 2 );
+			}
+		}
+
+		if ( empty( $out['indicators'] ) ) {
+			$out['leaf_notice'] = __( 'Карта полей пуста — добавьте строки в настройках эргономики (город).', 'worldstat-ergonomics' );
+		} elseif ( empty( $raw ) ) {
+			$out['leaf_notice'] = __( 'По текущей карте полей для этого города нет сырых значений (мета или Blocks & Roads).', 'worldstat-ergonomics' );
+		}
+
+		if ( ! empty( $raw ) && class_exists( 'WSErgo_Calculator' ) ) {
+			$lv = WSErgo_Calculator::compute_leaf_from_raw_indicator_map( $city_id, $raw );
+			if ( $lv !== null && $lv > 0 ) {
+				$out['leaf_e'] = (string) round( (float) $lv, 2 );
+			}
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Короткая строка для вывода сырого числа на сайте.
+	 */
+	private static function format_leaf_public_number( float $v ): string {
+		if ( ! is_finite( $v ) ) {
+			return '—';
+		}
+		$rn = round( $v );
+		if ( abs( $v - $rn ) < 1e-6 * max( 1.0, abs( $rn ) ) ) {
+			return (string) (int) $rn;
+		}
+		$s = number_format( $v, 6, '.', '' );
+		$s = rtrim( rtrim( $s, '0' ), '.' );
+		return $s === '' ? (string) $v : $s;
+	}
+
+	/**
 	 * Регион (строка wscity_region) внутри страны: среднее по городам с весом населения T3.
 	 */
 	public static function get_region_ergo_index( string $iso2, string $region_name ): ?float {

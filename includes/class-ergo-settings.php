@@ -20,7 +20,7 @@ class WSErgo_Settings {
 	public const OPTION_COUNTRY_INDEX_SOURCE = 'wsergo_country_index_source';
 	/** Опорный год для рядов country_code+year в CSV макромодели. */
 	public const OPTION_MACRO_REFERENCE_YEAR = 'wsergo_macro_reference_year';
-	/** ID поста wsp_country — эталон для колонки «Пример данных» на вкладке «Формула». */
+	/** ID поста wsp_country — эталон для колонки «Пример данных» на вкладке «Формула» страны. */
 	public const OPTION_MACRO_REFERENCE_COUNTRY_POST_ID = 'wsergo_macro_reference_country_post_id';
 	/** Число кластеров k-means для макромодели (по умолчанию 6). */
 	public const OPTION_MACRO_K_CLUSTERS     = 'wsergo_macro_k_clusters';
@@ -59,6 +59,29 @@ class WSErgo_Settings {
 	public const OPTION_MACRO_CRITERIA_INVERTS = 'wsergo_macro_criteria_inverts';
 	/** Сопоставление полей записи wsp_city → id показателя эргономики. */
 	public const OPTION_CITY_FIELD_MAP    = 'wsergo_city_field_map';
+	/**
+	 * @deprecated 1.4.8 Раньше — выбор эталонного города для превью в админке. Превью строится по эталонной стране
+	 * и первому городу этой страны; опция в БД может остаться, в форме не используется.
+	 */
+	public const OPTION_CITY_REFERENCE_POST_ID = 'wsergo_city_reference_post_id';
+	/** Версия методики для городского блока (отдельно от страны). */
+	public const OPTION_CITY_METHODOLOGY_VERSION = 'wsergo_city_methodology_version';
+	public const OPTION_CITY_MODELS            = 'wsergo_city_models';
+	public const OPTION_CITY_ACTIVE_MODEL      = 'wsergo_city_active_model_id';
+	public const OPTION_CITY_COEFFICIENTS      = 'wsergo_city_coefficients';
+	public const OPTION_CITY_MACRO_CUSTOM_METRICS = 'wsergo_city_macro_custom_metrics';
+	public const OPTION_CITY_DATA_LABELS_RU    = 'wsergo_city_data_labels_ru';
+	public const OPTION_CITY_MACRO_CRITERIA_MATRIX = 'wsergo_city_macro_criteria_matrix';
+	public const OPTION_CITY_MACRO_CRITERIA_WEIGHTS = 'wsergo_city_macro_criteria_weights';
+	public const OPTION_CITY_MACRO_CRITERIA_INVERTS = 'wsergo_city_macro_criteria_inverts';
+	public const OPTION_CITY_MACRO_CLUSTER_FEATURES = 'wsergo_city_macro_cluster_features';
+	public const OPTION_CITY_MACRO_EXTRA_SIGNALS_TEXT = 'wsergo_city_macro_extra_signals_text';
+	public const OPTION_CITY_MACRO_REFERENCE_YEAR = 'wsergo_city_macro_reference_year';
+	public const OPTION_CITY_MACRO_K_CLUSTERS   = 'wsergo_city_macro_k_clusters';
+	public const OPTION_CITY_MACRO_E_AXIS_WEIGHTS = 'wsergo_city_macro_e_axis_weights';
+	public const OPTION_CITY_MACRO_CSV_BINDINGS = 'wsergo_city_macro_csv_bindings';
+	/** Источник «макро» для города (пока только macro_datasets — те же CSV платформы). */
+	public const OPTION_CITY_INDEX_SOURCE        = 'wsergo_city_index_source';
 
 	/**
 	 * Модель по умолчанию: пустая leaf-формула — используется взвешенное среднее из WSErgo_Model.
@@ -367,6 +390,27 @@ class WSErgo_Settings {
 	}
 
 	/**
+	 * Хэш настроек макромодели «город» (инвалидация transient без смены CSV).
+	 */
+	public static function city_macro_config_hash(): string {
+		return md5(
+			wp_json_encode(
+				[
+					'b'  => self::get_city_macro_csv_bindings(),
+					'w'  => self::get_city_macro_e_axis_weights(),
+					'cf' => self::get_city_macro_cluster_features(),
+					'es' => self::get_city_macro_extra_signals_effective(),
+					'cx' => self::get_city_macro_custom_metrics(),
+					'cm' => self::get_city_macro_criteria_matrix(),
+					'cw' => self::get_city_macro_criteria_weights(),
+					'ci' => self::get_city_macro_criteria_inverts(),
+					'yr' => self::get_city_macro_reference_year(),
+				]
+			)
+		);
+	}
+
+	/**
 	 * Пользовательские формулы производных признаков (после встроенных производных из wide-CSV).
 	 *
 	 * @return list<array{slug:string,op:string,key_a:string,key_b:string,const:float}>
@@ -418,21 +462,30 @@ class WSErgo_Settings {
 	 * @return list<string>
 	 */
 	public static function get_macro_custom_metric_slugs_effective(): array {
-		if ( is_admin() && isset( $_POST['option_page'] ) && (string) wp_unslash( $_POST['option_page'] ) === 'wsergo_settings'
-			&& isset( $_POST[ self::OPTION_MACRO_CUSTOM_METRICS ] ) && is_array( $_POST[ self::OPTION_MACRO_CUSTOM_METRICS ] ) ) {
-			$slugs = array();
-			foreach ( wp_unslash( $_POST[ self::OPTION_MACRO_CUSTOM_METRICS ] ) as $row ) {
-				if ( ! is_array( $row ) ) {
-					continue;
-				}
-				$s = sanitize_key( (string) ( $row['slug'] ?? '' ) );
-				if ( $s !== '' ) {
-					$slugs[] = $s;
-				}
-			}
-			return array_values( array_unique( $slugs ) );
+		$from_db = self::get_macro_custom_metric_slugs();
+		if ( ! is_admin() ) {
+			return $from_db;
 		}
-		return self::get_macro_custom_metric_slugs();
+		if ( ! isset( $_SERVER['REQUEST_METHOD'] ) || strtoupper( (string) $_SERVER['REQUEST_METHOD'] ) !== 'POST' ) {
+			return $from_db;
+		}
+		if ( ! isset( $_POST['option_page'] ) || (string) wp_unslash( $_POST['option_page'] ) !== 'wsergo_settings' ) {
+			return $from_db;
+		}
+		if ( ! isset( $_POST[ self::OPTION_MACRO_CUSTOM_METRICS ] ) || ! is_array( $_POST[ self::OPTION_MACRO_CUSTOM_METRICS ] ) ) {
+			return $from_db;
+		}
+		$post_slugs = [];
+		foreach ( wp_unslash( $_POST[ self::OPTION_MACRO_CUSTOM_METRICS ] ) as $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$s = sanitize_key( (string) ( $row['slug'] ?? '' ) );
+			if ( $s !== '' ) {
+				$post_slugs[] = $s;
+			}
+		}
+		return array_values( array_unique( array_merge( $from_db, $post_slugs ) ) );
 	}
 
 	/**
@@ -825,6 +878,693 @@ class WSErgo_Settings {
 			}
 		}
 		return $out;
+	}
+
+	/**
+	 * Привязки CSV для городского блока (очистка при открытии настроек).
+	 */
+	public static function sync_city_macro_csv_bindings_with_storage(): void {
+		$raw = get_option( self::OPTION_CITY_MACRO_CSV_BINDINGS, [] );
+		if ( ! is_array( $raw ) ) {
+			$raw = [];
+		}
+		$desired     = self::normalize_macro_csv_bindings_option( $raw );
+		$needs_write = false;
+		$bindable    = self::macro_bindable_metric_keys();
+		$bind_flip   = array_flip( $bindable );
+		foreach ( $raw as $k => $v ) {
+			$mk = sanitize_key( (string) $k );
+			if ( $mk === '' ) {
+				continue;
+			}
+			if ( ! isset( $bind_flip[ $mk ] ) ) {
+				$needs_write = true;
+				break;
+			}
+		}
+		if ( ! $needs_write ) {
+			foreach ( $bindable as $mk ) {
+				$in_r = array_key_exists( $mk, $raw );
+				$in_d = array_key_exists( $mk, $desired );
+				if ( $in_r !== $in_d ) {
+					$needs_write = true;
+					break;
+				}
+				if ( $in_r && $in_d && (int) $raw[ $mk ] !== (int) $desired[ $mk ] ) {
+					$needs_write = true;
+					break;
+				}
+			}
+		}
+		if ( ! $needs_write && count( $raw ) !== count( array_intersect_key( $raw, $bind_flip ) ) ) {
+			$needs_write = true;
+		}
+		if ( ! $needs_write ) {
+			return;
+		}
+		$updated = update_option( self::OPTION_CITY_MACRO_CSV_BINDINGS, $desired );
+		if ( $updated && class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			WSErgo_Country_Macro_Calculator::flush_cache();
+		}
+	}
+
+	/**
+	 * @return list<string>
+	 */
+	public static function get_city_macro_extra_signals(): array {
+		$raw = get_option( self::OPTION_CITY_MACRO_EXTRA_SIGNALS_TEXT, '' );
+		return self::parse_macro_extra_signals_string( is_string( $raw ) ? $raw : '' );
+	}
+
+	/**
+	 * @return list<string>
+	 */
+	public static function get_city_macro_extra_signals_effective(): array {
+		if ( is_admin() && isset( $_POST['option_page'] ) && (string) wp_unslash( $_POST['option_page'] ) === 'wsergo_settings'
+			&& isset( $_POST[ self::OPTION_CITY_MACRO_EXTRA_SIGNALS_TEXT ] ) && is_string( $_POST[ self::OPTION_CITY_MACRO_EXTRA_SIGNALS_TEXT ] ) ) {
+			return self::parse_macro_extra_signals_string( wp_unslash( $_POST[ self::OPTION_CITY_MACRO_EXTRA_SIGNALS_TEXT ] ) );
+		}
+		return self::get_city_macro_extra_signals();
+	}
+
+	/**
+	 * @return list<string>
+	 */
+	public static function get_city_macro_custom_metric_slugs(): array {
+		$out = [];
+		foreach ( self::get_city_macro_custom_metrics() as $row ) {
+			if ( ! empty( $row['slug'] ) ) {
+				$out[] = (string) $row['slug'];
+			}
+		}
+		return array_values( array_unique( $out ) );
+	}
+
+	/**
+	 * @return list<string>
+	 */
+	public static function get_city_macro_custom_metric_slugs_effective(): array {
+		$from_db = self::get_city_macro_custom_metric_slugs();
+		if ( ! is_admin() ) {
+			return $from_db;
+		}
+		if ( ! isset( $_SERVER['REQUEST_METHOD'] ) || strtoupper( (string) $_SERVER['REQUEST_METHOD'] ) !== 'POST' ) {
+			return $from_db;
+		}
+		if ( ! isset( $_POST['option_page'] ) || (string) wp_unslash( $_POST['option_page'] ) !== 'wsergo_settings' ) {
+			return $from_db;
+		}
+		if ( ! isset( $_POST[ self::OPTION_CITY_MACRO_CUSTOM_METRICS ] ) || ! is_array( $_POST[ self::OPTION_CITY_MACRO_CUSTOM_METRICS ] ) ) {
+			return $from_db;
+		}
+		$post_slugs = [];
+		foreach ( wp_unslash( $_POST[ self::OPTION_CITY_MACRO_CUSTOM_METRICS ] ) as $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$s = sanitize_key( (string) ( $row['slug'] ?? '' ) );
+			if ( $s !== '' ) {
+				$post_slugs[] = $s;
+			}
+		}
+		return array_values( array_unique( array_merge( $from_db, $post_slugs ) ) );
+	}
+
+	/**
+	 * Id листовых показателей из карты полей города (POST при сохранении настроек или опция).
+	 *
+	 * @return list<string>
+	 */
+	public static function get_city_field_map_indicator_ids_effective(): array {
+		$out = [];
+		if ( is_admin() && isset( $_POST['option_page'] ) && (string) wp_unslash( $_POST['option_page'] ) === 'wsergo_settings'
+			&& isset( $_POST[ self::OPTION_CITY_FIELD_MAP ] ) && is_array( $_POST[ self::OPTION_CITY_FIELD_MAP ] ) ) {
+			foreach ( wp_unslash( $_POST[ self::OPTION_CITY_FIELD_MAP ] ) as $row ) {
+				if ( ! is_array( $row ) ) {
+					continue;
+				}
+				$ind = isset( $row['indicator_id'] ) ? sanitize_key( (string) $row['indicator_id'] ) : '';
+				if ( $ind !== '' ) {
+					$out[] = $ind;
+				}
+			}
+		} elseif ( class_exists( 'WSErgo_City_Bridge' ) ) {
+			foreach ( WSErgo_City_Bridge::get_field_map() as $row ) {
+				if ( ! is_array( $row ) || empty( $row['indicator_id'] ) ) {
+					continue;
+				}
+				$out[] = sanitize_key( (string) $row['indicator_id'] );
+			}
+		}
+		if ( empty( $out ) && class_exists( 'WSErgo_City_Defaults' ) ) {
+			foreach ( WSErgo_City_Defaults::default_city_field_map() as $row ) {
+				if ( ! is_array( $row ) || empty( $row['indicator_id'] ) ) {
+					continue;
+				}
+				$out[] = sanitize_key( (string) $row['indicator_id'] );
+			}
+		}
+		$out = array_values( array_unique( array_filter( $out ) ) );
+		sort( $out );
+		return $out;
+	}
+
+	/**
+	 * Реально встречающиеся ключи мета wscity_* у опубликованных городов (привязка к БД).
+	 *
+	 * @return list<string>
+	 */
+	public static function get_city_wscity_meta_keys_from_db(): array {
+		if ( ! class_exists( 'WSCities_CPT' ) ) {
+			return [];
+		}
+		global $wpdb;
+		$pt      = WSCities_CPT::SLUG;
+		$pattern = $wpdb->esc_like( 'wscity_' ) . '%';
+		$sql     = $wpdb->prepare(
+			"SELECT DISTINCT pm.meta_key FROM {$wpdb->postmeta} pm
+			INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+			WHERE p.post_type = %s AND p.post_status = 'publish' AND pm.meta_key LIKE %s
+			LIMIT 400",
+			$pt,
+			$pattern
+		);
+		$cols = $wpdb->get_col( $sql );
+		if ( ! is_array( $cols ) ) {
+			return [];
+		}
+		$out = [];
+		foreach ( $cols as $mk ) {
+			$k = sanitize_key( (string) $mk );
+			if ( $k !== '' && preg_match( '/^wscity_[a-z0-9_]+$/', $k ) ) {
+				$out[] = $k;
+			}
+		}
+		$out = array_values( array_unique( $out ) );
+		sort( $out );
+		return $out;
+	}
+
+	/**
+	 * Подпись по умолчанию для ключа города: таблица показателей, затем справочник источников, затем заглушка.
+	 */
+	public static function default_city_data_label_ru( string $key ): string {
+		$key = sanitize_key( $key );
+		if ( $key === '' ) {
+			return '';
+		}
+		if ( class_exists( 'WSErgo_Indicators' ) ) {
+			foreach ( WSErgo_Indicators::get_definitions() as $def ) {
+				if ( ! is_array( $def ) ) {
+					continue;
+				}
+				$id = isset( $def['id'] ) ? sanitize_key( (string) $def['id'] ) : '';
+				if ( $id === $key ) {
+					$lb = isset( $def['label'] ) ? sanitize_text_field( (string) $def['label'] ) : '';
+					if ( $lb !== '' ) {
+						return $lb;
+					}
+					break;
+				}
+			}
+		}
+		if ( strpos( $key, 'wscity_' ) === 0 && class_exists( 'WSErgo_City_Bridge' ) ) {
+			$src     = 'meta:' . $key;
+			$choices = WSErgo_City_Bridge::get_source_choices();
+			if ( isset( $choices[ $src ] ) && is_string( $choices[ $src ] ) ) {
+				return sanitize_text_field( wp_strip_all_tags( $choices[ $src ] ) );
+			}
+		}
+		return self::default_ru_label_for_custom_metric_slug( $key );
+	}
+
+	/**
+	 * Сигналы для матрицы города: показатели/мета из данных городов, доп. ключи, калькулятор, столбцы CSV.
+	 *
+	 * @return list<string>
+	 */
+	public static function macro_signal_allowlist_city(): array {
+		$merged = [];
+		$merged = array_merge( $merged, self::get_city_field_map_indicator_ids_effective() );
+		$merged = array_merge( $merged, self::get_city_wscity_meta_keys_from_db() );
+		$merged = array_merge( $merged, self::get_city_macro_extra_signals_effective() );
+		$merged = array_merge( $merged, self::get_city_macro_custom_metric_slugs_effective() );
+		$merged = array_merge( $merged, self::get_city_macro_custom_metric_slugs() );
+		if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) && WSErgo_Country_Macro_Calculator::has_macro_csv_data_sources() && class_exists( 'WorldStat_Uploaded_Csv' ) ) {
+			$merged = array_merge( $merged, WorldStat_Uploaded_Csv::get_cached_all_metric_column_keys() );
+		}
+		$merged = array_values( array_unique( array_map( 'sanitize_key', $merged ) ) );
+		$merged = array_filter(
+			$merged,
+			static function ( $x ) {
+				return $x !== '';
+			}
+		);
+		sort( $merged );
+		return array_values( $merged );
+	}
+
+	/**
+	 * @return list<string>
+	 */
+	public static function all_city_data_label_keys(): array {
+		$u = self::macro_signal_allowlist_city();
+		$u = array_unique( array_map( 'sanitize_key', $u ) );
+		$u = array_filter(
+			$u,
+			static function ( $x ) {
+				return $x !== '';
+			}
+		);
+		sort( $u );
+		return array_values( $u );
+	}
+
+	/**
+	 * @return list<array{slug:string,op:string,key_a:string,key_b:string,const:float}>
+	 */
+	public static function get_city_macro_custom_metrics(): array {
+		$raw = get_option( self::OPTION_CITY_MACRO_CUSTOM_METRICS, [] );
+		if ( ! is_array( $raw ) ) {
+			return [];
+		}
+		$out = [];
+		foreach ( $raw as $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$slug = sanitize_key( (string) ( $row['slug'] ?? '' ) );
+			$op   = sanitize_key( (string) ( $row['op'] ?? '' ) );
+			if ( $slug === '' || strlen( $slug ) > 96 || $op === '' ) {
+				continue;
+			}
+			$out[] = [
+				'slug'  => $slug,
+				'op'    => $op,
+				'key_a' => sanitize_key( (string) ( $row['key_a'] ?? '' ) ),
+				'key_b' => sanitize_key( (string) ( $row['key_b'] ?? '' ) ),
+				'const' => isset( $row['const'] ) && is_numeric( $row['const'] ) ? (float) $row['const'] : 0.0,
+			];
+		}
+		return $out;
+	}
+
+	public static function get_city_macro_reference_year(): int {
+		$y   = (int) get_option( self::OPTION_CITY_MACRO_REFERENCE_YEAR, 2022 );
+		$min = class_exists( 'WorldStat_Platform_Years' ) ? max( 1900, WorldStat_Platform_Years::min() ) : 1900;
+		$max = class_exists( 'WorldStat_Platform_Years' ) ? max( 2100, WorldStat_Platform_Years::max() ) : 2100;
+		return max( $min, min( $max, $y ) );
+	}
+
+	public static function get_city_macro_k_clusters(): int {
+		$k = (int) get_option( self::OPTION_CITY_MACRO_K_CLUSTERS, 6 );
+		return max( 2, min( 12, $k ) );
+	}
+
+	/**
+	 * @return array{F:float,Cm:float,H:float,A:float,S:float,Ct:float}
+	 */
+	public static function get_city_macro_e_axis_weights(): array {
+		$defaults = [
+			'F'  => 0.24,
+			'Cm' => 0.22,
+			'H'  => 0.18,
+			'A'  => 0.14,
+			'S'  => 0.12,
+			'Ct' => 0.10,
+		];
+		$raw = get_option( self::OPTION_CITY_MACRO_E_AXIS_WEIGHTS, [] );
+		if ( ! is_array( $raw ) ) {
+			$raw = [];
+		}
+		$out = [];
+		foreach ( $defaults as $axis => $def ) {
+			$w = isset( $raw[ $axis ] ) ? (float) $raw[ $axis ] : $def;
+			$out[ $axis ] = $w > 0 ? $w : $def;
+		}
+		$sum = array_sum( $out );
+		if ( $sum <= 0 ) {
+			return $defaults;
+		}
+		foreach ( $out as $axis => $w ) {
+			$out[ $axis ] = $w / $sum;
+		}
+		return $out;
+	}
+
+	/**
+	 * @return list<string>
+	 */
+	public static function get_city_macro_cluster_features(): array {
+		$raw = get_option( self::OPTION_CITY_MACRO_CLUSTER_FEATURES, null );
+		if ( ! is_array( $raw ) ) {
+			return [];
+		}
+		$allow = array_flip( self::macro_signal_allowlist_city() );
+		$out   = [];
+		foreach ( $raw as $x ) {
+			$k = sanitize_key( (string) $x );
+			if ( $k !== '' && isset( $allow[ $k ] ) ) {
+				$out[] = $k;
+			}
+		}
+		return array_values( array_unique( $out ) );
+	}
+
+	/**
+	 * @return array<string, string>
+	 */
+	public static function get_city_data_labels_ru(): array {
+		$raw = get_option( self::OPTION_CITY_DATA_LABELS_RU, [] );
+		if ( ! is_array( $raw ) ) {
+			return [];
+		}
+		$out = [];
+		foreach ( $raw as $k => $v ) {
+			$key = sanitize_key( (string) $k );
+			if ( $key === '' || strlen( $key ) > 96 ) {
+				continue;
+			}
+			$text = sanitize_text_field( (string) $v );
+			if ( $text !== '' ) {
+				$out[ $key ] = $text;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * @return array<string, array<string, true>>
+	 */
+	public static function get_city_macro_criteria_matrix(): array {
+		$raw = get_option( self::OPTION_CITY_MACRO_CRITERIA_MATRIX, [] );
+		if ( ! is_array( $raw ) || ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			return [];
+		}
+		$allow = array_flip( self::macro_signal_allowlist_city() );
+		$axes  = [ 'F', 'Cm', 'H', 'A', 'S', 'Ct' ];
+		$out   = [];
+		foreach ( $raw as $sig => $row ) {
+			$k = sanitize_key( (string) $sig );
+			if ( $k === '' || ! isset( $allow[ $k ] ) ) {
+				continue;
+			}
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			foreach ( $axes as $ax ) {
+				if ( ! empty( $row[ $ax ] ) ) {
+					if ( ! isset( $out[ $k ] ) ) {
+						$out[ $k ] = [];
+					}
+					$out[ $k ][ $ax ] = true;
+				}
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * @return array<string, array<string, float>>
+	 */
+	public static function get_city_macro_criteria_weights(): array {
+		$raw = get_option( self::OPTION_CITY_MACRO_CRITERIA_WEIGHTS, [] );
+		if ( ! is_array( $raw ) || ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			return [];
+		}
+		$allow = array_flip( self::macro_signal_allowlist_city() );
+		$axes  = [ 'F', 'Cm', 'H', 'A', 'S', 'Ct' ];
+		$out   = [];
+		foreach ( $raw as $sig => $row ) {
+			$k = sanitize_key( (string) $sig );
+			if ( $k === '' || ! isset( $allow[ $k ] ) ) {
+				continue;
+			}
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			foreach ( $axes as $ax ) {
+				if ( ! isset( $row[ $ax ] ) ) {
+					continue;
+				}
+				$w = (float) str_replace( ',', '.', trim( (string) $row[ $ax ] ) );
+				if ( $w < 0 ) {
+					$w = 0.0;
+				}
+				if ( ! isset( $out[ $k ] ) ) {
+					$out[ $k ] = [];
+				}
+				$out[ $k ][ $ax ] = $w;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * @return array<string, array<string, bool>>
+	 */
+	public static function get_city_macro_criteria_inverts(): array {
+		$raw = get_option( self::OPTION_CITY_MACRO_CRITERIA_INVERTS, [] );
+		if ( ! is_array( $raw ) || ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			return [];
+		}
+		$allow = array_flip( self::macro_signal_allowlist_city() );
+		$axes  = [ 'F', 'Cm', 'H', 'A', 'S', 'Ct' ];
+		$out   = [];
+		foreach ( $raw as $sig => $row ) {
+			$k = sanitize_key( (string) $sig );
+			if ( $k === '' || ! isset( $allow[ $k ] ) ) {
+				continue;
+			}
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			foreach ( $axes as $ax ) {
+				if ( ! array_key_exists( $ax, $row ) ) {
+					continue;
+				}
+				if ( ! isset( $out[ $k ] ) ) {
+					$out[ $k ] = [];
+				}
+				$out[ $k ][ $ax ] = filter_var( $row[ $ax ], FILTER_VALIDATE_BOOLEAN );
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * @return array<string, list<array{signal:string, invert:bool, weight:float}>>
+	 */
+	public static function build_city_axis_terms_from_criteria_matrix(): array {
+		if ( ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			return [];
+		}
+		$def     = WSErgo_Country_Macro_Calculator::default_macro_axis_terms();
+		$matrix  = self::get_city_macro_criteria_matrix();
+		$w_opt   = self::get_city_macro_criteria_weights();
+		$inv_opt = self::get_city_macro_criteria_inverts();
+		$axes    = [ 'F', 'Cm', 'H', 'A', 'S', 'Ct' ];
+		$out     = [];
+		foreach ( $axes as $ax ) {
+			$checked = [];
+			foreach ( $matrix as $sig => $axm ) {
+				if ( isset( $axm[ $ax ] ) && $axm[ $ax ] ) {
+					$checked[] = $sig;
+				}
+			}
+			sort( $checked, SORT_STRING );
+			$n = count( $checked );
+			if ( $n === 0 ) {
+				$out[ $ax ] = $def[ $ax ] ?? [];
+				continue;
+			}
+			$manual_vals = [];
+			$auto_sigs   = [];
+			foreach ( $checked as $sig ) {
+				$rw = $w_opt[ $sig ][ $ax ] ?? null;
+				if ( $rw !== null && $rw > 0 ) {
+					$manual_vals[ $sig ] = (float) $rw;
+				} else {
+					$auto_sigs[] = $sig;
+				}
+			}
+			$sum_m  = array_sum( $manual_vals );
+			$n_auto = count( $auto_sigs );
+			$n_man  = count( $manual_vals );
+			$rows   = [];
+
+			if ( $n_man === 0 ) {
+				$eq = $n > 0 ? 1.0 / $n : 0.0;
+				foreach ( $checked as $sig ) {
+					$rows[] = [
+						'signal' => $sig,
+						'invert' => self::resolve_matrix_invert( $ax, $sig, $inv_opt, $def ),
+						'weight' => $eq,
+					];
+				}
+			} elseif ( $n_auto === 0 ) {
+				if ( $sum_m <= 1e-15 ) {
+					$eq = 1.0 / $n;
+					foreach ( $checked as $sig ) {
+						$rows[] = [
+							'signal' => $sig,
+							'invert' => self::resolve_matrix_invert( $ax, $sig, $inv_opt, $def ),
+							'weight' => $eq,
+						];
+					}
+				} elseif ( $sum_m > 1.0 + 1e-9 ) {
+					foreach ( $manual_vals as $sig => $v ) {
+						$rows[] = [
+							'signal' => $sig,
+							'invert' => self::resolve_matrix_invert( $ax, $sig, $inv_opt, $def ),
+							'weight' => $v / $sum_m,
+						];
+					}
+				} else {
+					$rem  = 1.0 - $sum_m;
+					$each = $n_man > 0 ? $rem / $n_man : 0.0;
+					foreach ( $manual_vals as $sig => $v ) {
+						$rows[] = [
+							'signal' => $sig,
+							'invert' => self::resolve_matrix_invert( $ax, $sig, $inv_opt, $def ),
+							'weight' => $v + $each,
+						];
+					}
+				}
+			} elseif ( $sum_m > 1.0 + 1e-9 ) {
+				foreach ( $checked as $sig ) {
+					if ( isset( $manual_vals[ $sig ] ) ) {
+						$wt = $manual_vals[ $sig ] / $sum_m;
+					} else {
+						$wt = 0.0;
+					}
+					$rows[] = [
+						'signal' => $sig,
+						'invert' => self::resolve_matrix_invert( $ax, $sig, $inv_opt, $def ),
+						'weight' => $wt,
+					];
+				}
+			} else {
+				$rem    = max( 0.0, 1.0 - $sum_m );
+				$each_a = $n_auto > 0 ? $rem / $n_auto : 0.0;
+				foreach ( $checked as $sig ) {
+					$w_sig = isset( $manual_vals[ $sig ] ) ? $manual_vals[ $sig ] : $each_a;
+					$rows[] = [
+						'signal' => $sig,
+						'invert' => self::resolve_matrix_invert( $ax, $sig, $inv_opt, $def ),
+						'weight' => $w_sig,
+					];
+				}
+			}
+			$out[ $ax ] = $rows;
+		}
+		return $out;
+	}
+
+	/**
+	 * @return array<string, list<array{signal:string, invert:bool, weight:float}>>
+	 */
+	public static function get_city_macro_axis_terms_resolved(): array {
+		if ( ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			return [];
+		}
+		return self::build_city_axis_terms_from_criteria_matrix();
+	}
+
+	/**
+	 * @return array<string, int>
+	 */
+	public static function get_city_macro_csv_bindings(): array {
+		$raw = get_option( self::OPTION_CITY_MACRO_CSV_BINDINGS, [] );
+		if ( ! is_array( $raw ) ) {
+			return [];
+		}
+		return self::normalize_macro_csv_bindings_option( $raw );
+	}
+
+	/**
+	 * @return array<int, array{id:string,name:string,leaf_formula:string}>
+	 */
+	public static function get_city_models(): array {
+		$stored = get_option( self::OPTION_CITY_MODELS, null );
+		if ( ! is_array( $stored ) || ! $stored ) {
+			return self::get_default_models();
+		}
+		return $stored;
+	}
+
+	/**
+	 * @return array{id:string,name:string,leaf_formula:string}|null
+	 */
+	public static function get_city_active_model(): ?array {
+		$id     = (string) get_option( self::OPTION_CITY_ACTIVE_MODEL, 'default_weighted' );
+		$models = self::get_city_models();
+		foreach ( $models as $m ) {
+			if ( isset( $m['id'] ) && $m['id'] === $id ) {
+				return $m;
+			}
+		}
+		return $models[0] ?? null;
+	}
+
+	/**
+	 * @return array<string, float>
+	 */
+	public static function get_city_coefficients(): array {
+		$stored = get_option( self::OPTION_CITY_COEFFICIENTS, [] );
+		if ( ! is_array( $stored ) ) {
+			$stored = [];
+		}
+		$out = [ 'k_default' => 1.0 ];
+		foreach ( $stored as $k => $v ) {
+			$key = sanitize_key( (string) $k );
+			if ( $key === '' ) {
+				continue;
+			}
+			if ( substr( $key, 0, 2 ) !== 'k_' ) {
+				$key = 'k_' . $key;
+			}
+			$out[ $key ] = (float) $v;
+		}
+		return $out;
+	}
+
+	/**
+	 * Идентификаторы DSL для городских моделей (те же оси и i_*).
+	 *
+	 * @return array<string, string>
+	 */
+	public static function get_city_leaf_formula_allowed_ids(): array {
+		$labels = WSErgo_Model::get_dimension_labels();
+		$ids    = [];
+		$short  = [
+			'F' => WSErgo_Model::DIM_FUNCTIONALITY,
+			'S' => WSErgo_Model::DIM_SAFETY,
+			'C' => WSErgo_Model::DIM_COMFORT,
+			'L' => WSErgo_Model::DIM_LIVABILITY,
+			'O' => WSErgo_Model::DIM_MASTERABILITY,
+			'M' => WSErgo_Model::DIM_MANAGEABILITY,
+		];
+		foreach ( $short as $letter => $dim ) {
+			$ids[ $letter ] = $labels[ $dim ];
+		}
+		foreach ( WSErgo_Model::DIMENSION_KEYS as $dim ) {
+			$ids[ $dim ] = $labels[ $dim ];
+		}
+		$weights = WSErgo_Model::get_weights();
+		foreach ( $weights as $dim => $w ) {
+			$ids[ 'w_' . $dim ] = 'w_' . $dim;
+		}
+		foreach ( self::get_city_coefficients() as $k => $v ) {
+			$ids[ $k ] = $k;
+		}
+		if ( class_exists( 'WSErgo_Indicators' ) ) {
+			foreach ( WSErgo_Indicators::get_definitions() as $def ) {
+				$key         = 'i_' . $def['id'];
+				$ids[ $key ] = $def['label'];
+			}
+		}
+		return $ids;
 	}
 
 	/**
