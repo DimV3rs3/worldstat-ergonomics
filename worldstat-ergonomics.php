@@ -3,7 +3,7 @@
  * Plugin Name:       WorldStat — Ergonomics
  * Plugin URI:        https://example.com/worldstat-ergonomics
  * Description:       Официальное расширение World Statistics Platform: эргономичность (6 измерений), иерархия помещение→здание→квартал→город→регион→страна, DSL-модели и коэффициенты. Модель района (wsp_district) по мета wsdistrict_*. Требует платформу и WorldStat Cities.
- * Version:           1.4.7
+ * Version:           1.4.9
  * Requires at least: 5.8
  * Requires PHP:      7.4
  * Requires Plugins:  world-statistics-platform, worldstat-cities
@@ -18,7 +18,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'WSERGO_VERSION', '1.4.7' );
+define( 'WSERGO_VERSION', '1.4.9' );
 define( 'WSERGO_FILE', __FILE__ );
 define( 'WSERGO_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WSERGO_URL', plugin_dir_url( __FILE__ ) );
@@ -58,6 +58,9 @@ require_once WSERGO_DIR . 'includes/class-ergo-calculator.php';
 require_once WSERGO_DIR . 'includes/class-ergo-city-bridge.php';
 require_once WSERGO_DIR . 'includes/class-ergo-city-defaults.php';
 require_once WSERGO_DIR . 'includes/class-ergo-country-macro-calculator.php';
+require_once WSERGO_DIR . 'includes/class-ergo-tier-classifier.php';
+require_once WSERGO_DIR . 'includes/class-ergo-macro-recommendations.php';
+require_once WSERGO_DIR . 'includes/class-ergo-macro-cluster-optimizer.php';
 require_once WSERGO_DIR . 'includes/class-ergo-data.php';
 require_once WSERGO_DIR . 'includes/class-ergo-city-regression.php';
 require_once WSERGO_DIR . 'includes/class-ergo-renderer.php';
@@ -187,6 +190,74 @@ add_action(
 
 add_action( 'wp_ajax_wsergo_save_district_criteria_weights', 'wsergo_save_district_criteria_weights' );
 add_action( 'wp_ajax_wsergo_retrain_neural_networks', 'wsergo_retrain_neural_networks' );
+add_action( 'wp_ajax_wsergo_load_country_city_explorer', [ 'WSErgo_Renderer', 'ajax_load_country_city_explorer' ] );
+add_action( 'wp_ajax_nopriv_wsergo_load_country_city_explorer', [ 'WSErgo_Renderer', 'ajax_load_country_city_explorer' ] );
+add_action( 'wp_ajax_wsergo_load_country_city_macro', [ 'WSErgo_Renderer', 'ajax_load_country_city_macro' ] );
+add_action( 'wp_ajax_nopriv_wsergo_load_country_city_macro', [ 'WSErgo_Renderer', 'ajax_load_country_city_macro' ] );
+add_action( 'wp_ajax_wsergo_auto_tune_macro_clusters', 'wsergo_ajax_auto_tune_macro_clusters' );
+add_action( 'wp_ajax_wsergo_load_cluster_features_ui', 'wsergo_ajax_load_cluster_features_ui' );
+
+/**
+ * AJAX: автоподбор признаков k-means и числа кластеров.
+ */
+function wsergo_ajax_auto_tune_macro_clusters(): void {
+	check_ajax_referer( 'wsergo_admin', 'nonce' );
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'worldstat-ergonomics' ) ) );
+	}
+	$scope  = isset( $_POST['scope'] ) && (string) wp_unslash( $_POST['scope'] ) === 'city' ? 'city' : 'country';
+	$apply  = ! empty( $_POST['apply'] );
+	$result = class_exists( 'WSErgo_Macro_Cluster_Optimizer' )
+		? WSErgo_Macro_Cluster_Optimizer::auto_tune( $scope )
+		: array( 'ok' => false, 'message' => __( 'Модуль автоподбора недоступен.', 'worldstat-ergonomics' ) );
+	if ( empty( $result['ok'] ) ) {
+		wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Ошибка подбора.', 'worldstat-ergonomics' ) ) ) );
+	}
+	if ( $apply && ! empty( $result['features'] ) && isset( $result['k'] ) ) {
+		WSErgo_Macro_Cluster_Optimizer::apply_to_options( (array) $result['features'], (int) $result['k'], $scope );
+		$result['saved'] = true;
+	}
+	wp_send_json_success( $result );
+}
+
+/**
+ * AJAX: чекбоксы признаков k-means (ленивая загрузка админки).
+ */
+function wsergo_ajax_load_cluster_features_ui(): void {
+	check_ajax_referer( 'wsergo_admin', 'nonce' );
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'worldstat-ergonomics' ) ) );
+	}
+	$scope     = isset( $_POST['scope'] ) && (string) wp_unslash( $_POST['scope'] ) === 'city' ? 'city' : 'country';
+	$opt_name  = ( 'city' === $scope )
+		? WSErgo_Settings::OPTION_CITY_MACRO_CLUSTER_FEATURES
+		: WSErgo_Settings::OPTION_MACRO_CLUSTER_FEATURES;
+	$stored_cf = ( 'city' === $scope )
+		? WSErgo_Settings::get_city_macro_cluster_features()
+		: WSErgo_Settings::get_macro_cluster_features();
+	$default_cf = class_exists( 'WSErgo_Country_Macro_Calculator' )
+		? WSErgo_Country_Macro_Calculator::default_cluster_features()
+		: array();
+	$cf_for_checkboxes = count( $stored_cf ) >= 2 ? $stored_cf : $default_cf;
+	$signals_ui        = ( 'city' === $scope )
+		? WSErgo_Settings::macro_signal_allowlist_city()
+		: WSErgo_Country_Macro_Calculator::get_cached_macro_signal_allowlist();
+
+	ob_start();
+	echo '<div class="wsergo-cluster-features-list" data-scope="' . esc_attr( $scope ) . '">';
+	foreach ( $signals_ui as $sig ) {
+		$checked = in_array( $sig, $cf_for_checkboxes, true );
+		echo '<label style="display:block;margin:.35em 0;">';
+		echo '<input type="checkbox" name="' . esc_attr( $opt_name ) . '[]" value="' . esc_attr( $sig ) . '"';
+		echo $checked ? ' checked="checked"' : '';
+		echo ' /> ';
+		echo '<strong>' . esc_html( class_exists( 'WSErgo_Country_Macro_Calculator' ) ? WSErgo_Country_Macro_Calculator::data_label_ru( $sig ) : $sig ) . '</strong>';
+		echo ' <code style="margin-left:6px;">' . esc_html( $sig ) . '</code>';
+		echo '</label>';
+	}
+	echo '</div>';
+	wp_send_json_success( array( 'html' => ob_get_clean() ) );
+}
 
 /**
  * Сохранение весов критериев сводного индекса модели района.

@@ -59,8 +59,13 @@ class WSErgo_Admin {
 
 	public function register_settings(): void {
 		if ( isset( $_GET['page'] ) && (string) $_GET['page'] === 'wsergo-settings' && current_user_can( 'manage_options' ) && class_exists( 'WSErgo_Settings' ) ) {
-			WSErgo_Settings::sync_macro_csv_bindings_with_storage();
-			WSErgo_Settings::sync_city_macro_csv_bindings_with_storage();
+			$rev  = (int) get_option( 'wsp_csv_files_revision', 0 );
+			$last = (int) get_transient( 'wsergo_admin_bindings_sync_rev' );
+			if ( $last !== $rev ) {
+				WSErgo_Settings::sync_macro_csv_bindings_with_storage();
+				WSErgo_Settings::sync_city_macro_csv_bindings_with_storage();
+				set_transient( 'wsergo_admin_bindings_sync_rev', $rev, DAY_IN_SECONDS );
+			}
 		}
 		if ( ! get_option( 'wsergo_methodology_version', null ) ) {
 			add_option( 'wsergo_methodology_version', '1.2' );
@@ -1955,12 +1960,37 @@ class WSErgo_Admin {
 				WSERGO_VERSION,
 				true
 			);
+			wp_enqueue_script(
+				'wsergo-cluster-tune',
+				WSERGO_URL . 'assets/js/wsergo-cluster-tune.js',
+				[ 'jquery' ],
+				WSERGO_VERSION,
+				true
+			);
 			wp_localize_script(
 				'wsergo-settings-country',
 				'wsergoAdmin',
 				[
 					'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 					'nonce'   => wp_create_nonce( 'wsergo_admin' ),
+				]
+			);
+			wp_localize_script(
+				'wsergo-cluster-tune',
+				'wsergoClusterTune',
+				[
+					'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+					'nonce'   => wp_create_nonce( 'wsergo_admin' ),
+					'i18n'    => [
+						'running'    => __( 'Анализ данных и подбор параметров…', 'worldstat-ergonomics' ),
+						'done'       => __( 'Параметры применены к форме. Нажмите «Сохранить настройки» внизу страницы.', 'worldstat-ergonomics' ),
+						'saved'      => __( 'Параметры сохранены, кэш пересчёта сброшен.', 'worldstat-ergonomics' ),
+						'error'      => __( 'Не удалось выполнить автоподбор.', 'worldstat-ergonomics' ),
+						'loadingUi'  => __( 'Загрузка списка признаков…', 'worldstat-ergonomics' ),
+						'cv'         => __( 'разброс (CV)', 'worldstat-ergonomics' ),
+						'coverage'   => __( 'покрытие', 'worldstat-ergonomics' ),
+						'selected'   => __( 'в подборе', 'worldstat-ergonomics' ),
+					],
 				]
 			);
 			$wsergo_cm_opt_key = class_exists( 'WSErgo_Settings' ) ? WSErgo_Settings::OPTION_MACRO_CUSTOM_METRICS : 'wsergo_macro_custom_metrics';
@@ -2629,15 +2659,11 @@ class WSErgo_Admin {
 		$macro_criteria_w      = class_exists( 'WSErgo_Settings' ) ? WSErgo_Settings::get_macro_criteria_weights() : [];
 		$macro_criteria_inv    = class_exists( 'WSErgo_Settings' ) ? WSErgo_Settings::get_macro_criteria_inverts() : [];
 		$macro_axes_six        = [ 'F', 'Cm', 'H', 'A', 'S', 'Ct' ];
-		$ref_macro_raw_row     = null;
+		$ref_macro_raw_row      = null;
 		$ref_macro_example_note = '';
-		if ( $macro_ref_country_id > 0 && class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+		if ( $macro_ref_country_id > 0 ) {
 			$iso2_ref = strtoupper( trim( (string) get_post_meta( $macro_ref_country_id, 'wsp_iso_alpha2', true ) ) );
 			if ( strlen( $iso2_ref ) === 2 ) {
-				$det_ref = WSErgo_Country_Macro_Calculator::get_country_macro_detail( $iso2_ref );
-				if ( $det_ref && isset( $det_ref['raw_row'] ) && is_array( $det_ref['raw_row'] ) ) {
-					$ref_macro_raw_row = $det_ref['raw_row'];
-				}
 				$tref = get_the_title( $macro_ref_country_id );
 				$ref_macro_example_note = $tref !== '' ? $tref . ' (' . $iso2_ref . ', ' . (int) $macro_year . ')' : '';
 			}
@@ -3015,16 +3041,16 @@ class WSErgo_Admin {
 					</table>
 					<hr />
 					<h3><?php esc_html_e( 'Признаки для k-means (макро)', 'worldstat-ergonomics' ); ?></h3>
-					<p class="description"><?php esc_html_e( 'Отметьте признаки, входящие в вектор кластеризации. Нужно не меньше двух; иначе используется встроенный набор плагина. Снимите ненужные или добавьте новые из списка.', 'worldstat-ergonomics' ); ?></p>
-					<div style="max-height:220px;overflow:auto;border:1px solid #c3c4c7;padding:10px;background:#fff;">
-						<?php foreach ( $signals_ui as $sig ) : ?>
-							<label style="display:block;margin:.35em 0;">
-								<input type="checkbox" name="<?php echo esc_attr( WSErgo_Settings::OPTION_MACRO_CLUSTER_FEATURES ); ?>[]" value="<?php echo esc_attr( $sig ); ?>" <?php checked( in_array( $sig, $cf_for_checkboxes, true ), true ); ?> />
-								<strong><?php echo esc_html( class_exists( 'WSErgo_Country_Macro_Calculator' ) ? WSErgo_Country_Macro_Calculator::data_label_ru( $sig ) : $sig ); ?></strong>
-								<code style="margin-left:6px;"><?php echo esc_html( $sig ); ?></code>
-							</label>
-						<?php endforeach; ?>
+					<p class="description"><?php esc_html_e( 'Отметьте признаки, входящие в вектор кластеризации. Нужно не меньше двух; иначе используется встроенный набор плагина. Кнопка «Автоподбор» анализирует разброс показателей в CSV и подбирает некоррелированные признаки с высокой вариативностью, а также оптимальное k (метод локтя).', 'worldstat-ergonomics' ); ?></p>
+					<p style="margin:.75em 0;">
+						<button type="button" class="button button-primary wsergo-auto-tune-clusters" data-scope="country"><?php esc_html_e( 'Автоподбор признаков и k', 'worldstat-ergonomics' ); ?></button>
+						<button type="button" class="button wsergo-auto-tune-clusters-save" data-scope="country"><?php esc_html_e( 'Автоподбор и сохранить', 'worldstat-ergonomics' ); ?></button>
+						<span class="wsergo-auto-tune-status wsp-muted" style="margin-left:8px;"></span>
+					</p>
+					<div id="wsergo-cluster-features-country" class="wsergo-cluster-features-host" data-scope="country" style="max-height:220px;overflow:auto;border:1px solid #c3c4c7;padding:10px;background:#fff;">
+						<p class="wsp-muted wsergo-cluster-features-loading"><?php esc_html_e( 'Загрузка списка признаков…', 'worldstat-ergonomics' ); ?></p>
 					</div>
+					<div id="wsergo-cluster-tune-report-country" class="wsergo-cluster-tune-report" style="display:none;margin-top:10px;padding:10px;border:1px solid #c3c4c7;background:#fff;max-height:180px;overflow:auto;"></div>
 					<table class="form-table" role="presentation">
 						<tr>
 							<th scope="row">
@@ -3592,15 +3618,15 @@ class WSErgo_Admin {
 					<hr />
 					<h3><?php esc_html_e( 'Признаки для k-means (макро города)', 'worldstat-ergonomics' ); ?></h3>
 					<p class="description"><?php esc_html_e( 'Вектор кластеризации для городских макро-настроек; не меньше двух признаков.', 'worldstat-ergonomics' ); ?></p>
-					<div style="max-height:220px;overflow:auto;border:1px solid #c3c4c7;padding:10px;background:#fff;">
-						<?php foreach ( $signals_ui_city as $sig_c ) : ?>
-							<label style="display:block;margin:.35em 0;">
-								<input type="checkbox" name="<?php echo esc_attr( WSErgo_Settings::OPTION_CITY_MACRO_CLUSTER_FEATURES ); ?>[]" value="<?php echo esc_attr( $sig_c ); ?>" <?php checked( in_array( $sig_c, $cf_for_checkboxes_city, true ), true ); ?> />
-								<strong><?php echo esc_html( $city_macro_label_ru( $sig_c ) ); ?></strong>
-								<code style="margin-left:6px;"><?php echo esc_html( $sig_c ); ?></code>
-							</label>
-						<?php endforeach; ?>
+					<p style="margin:.75em 0;">
+						<button type="button" class="button button-primary wsergo-auto-tune-clusters" data-scope="city"><?php esc_html_e( 'Автоподбор признаков и k', 'worldstat-ergonomics' ); ?></button>
+						<button type="button" class="button wsergo-auto-tune-clusters-save" data-scope="city"><?php esc_html_e( 'Автоподбор и сохранить', 'worldstat-ergonomics' ); ?></button>
+						<span class="wsergo-auto-tune-status wsp-muted" style="margin-left:8px;"></span>
+					</p>
+					<div id="wsergo-cluster-features-city" class="wsergo-cluster-features-host" data-scope="city" style="max-height:220px;overflow:auto;border:1px solid #c3c4c7;padding:10px;background:#fff;">
+						<p class="wsp-muted wsergo-cluster-features-loading"><?php esc_html_e( 'Загрузка списка признаков…', 'worldstat-ergonomics' ); ?></p>
 					</div>
+					<div id="wsergo-cluster-tune-report-city" class="wsergo-cluster-tune-report" style="display:none;margin-top:10px;padding:10px;border:1px solid #c3c4c7;background:#fff;max-height:180px;overflow:auto;"></div>
 					<table class="form-table" role="presentation">
 						<tr>
 							<th scope="row">

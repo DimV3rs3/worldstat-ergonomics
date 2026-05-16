@@ -112,6 +112,13 @@ class WSErgo_Country_Macro_Calculator {
 		delete_transient( 'wsergo_macro_scores_bundle' );
 		self::$runtime_full_bundle = null;
 		self::$runtime_city_bundle  = null;
+		if ( class_exists( 'WSErgo_Tier_Classifier' ) ) {
+			WSErgo_Tier_Classifier::flush_runtime_cache();
+		}
+		if ( class_exists( 'WSErgo_Settings' ) ) {
+			$rev = (int) get_option( 'wsp_csv_files_revision', 0 );
+			delete_transient( 'wsergo_macro_allowlist_v2_' . $rev . '_' . substr( WSErgo_Settings::macro_config_hash(), 0, 12 ) );
+		}
 	}
 
 	/**
@@ -245,6 +252,26 @@ class WSErgo_Country_Macro_Calculator {
 		);
 		sort( $merged );
 		return array_values( $merged );
+	}
+
+	/**
+	 * Кэшированный список признаков для админки (без повторного обхода CSV на каждый запрос).
+	 *
+	 * @return list<string>
+	 */
+	public static function get_cached_macro_signal_allowlist(): array {
+		$rev = (int) get_option( 'wsp_csv_files_revision', 0 );
+		$key = 'wsergo_macro_allowlist_v2_' . $rev;
+		if ( class_exists( 'WSErgo_Settings' ) ) {
+			$key .= '_' . substr( WSErgo_Settings::macro_config_hash(), 0, 12 );
+		}
+		$cached = get_transient( $key );
+		if ( is_array( $cached ) ) {
+			return $cached;
+		}
+		$list = self::macro_signal_allowlist();
+		set_transient( $key, $list, 6 * HOUR_IN_SECONDS );
+		return $list;
 	}
 
 	/**

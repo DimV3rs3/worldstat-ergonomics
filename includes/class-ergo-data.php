@@ -10,6 +10,33 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 class WSErgo_Data {
+
+	/** @var array<string, array<int, float|null>> */
+	private static $country_city_index_cache = array();
+
+	/**
+	 * Индексы E всех городов страны за один проход (кэш на запрос).
+	 *
+	 * @return array<int, float|null> post_id => index
+	 */
+	public static function get_country_city_indices( string $iso2 ): array {
+		$iso2 = strtoupper( sanitize_text_field( $iso2 ) );
+		if ( isset( self::$country_city_index_cache[ $iso2 ] ) ) {
+			return self::$country_city_index_cache[ $iso2 ];
+		}
+		$out    = array();
+		$cities = self::get_country_cities( $iso2 );
+		foreach ( $cities as $c ) {
+			$cid = (int) ( $c['id'] ?? 0 );
+			if ( $cid <= 0 ) {
+				continue;
+			}
+			$out[ $cid ] = self::get_city_ergo_index( $cid );
+		}
+		self::$country_city_index_cache[ $iso2 ] = $out;
+		return $out;
+	}
+
 	/**
 	 * Безопасно получить список городов страны из Cities.
 	 *
