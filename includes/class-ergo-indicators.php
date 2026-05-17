@@ -163,22 +163,66 @@ class WSErgo_Indicators {
 	}
 
 	/**
-	 * Взвешенное среднее по измерению из переданных сырых значений (без мета записи).
-	 *
 	 * @param array<string, float> $raw_by_indicator_id
+	 * @return array<int, array{id:string,label:string,dimension:string,unit:string,vmin:float,vmax:float,direction:string,weight:float}>
 	 */
-	public static function compute_dimension_from_raw_map( array $raw_by_indicator_id, string $dimension ): ?float {
-		$defs = [];
+	public static function get_definitions_for_raw_map( array $raw_by_indicator_id ): array {
+		return self::definitions_for_raw_map( $raw_by_indicator_id );
+	}
+
+	/**
+	 * @param array<string, float> $raw_by_indicator_id
+	 * @return array<int, array{id:string,label:string,dimension:string,unit:string,vmin:float,vmax:float,direction:string,weight:float}>
+	 */
+	private static function definitions_for_raw_map( array $raw_by_indicator_id ): array {
+		$by_id = [];
 		foreach ( self::get_definitions() as $d ) {
-			if ( $d['dimension'] === $dimension ) {
-				$defs[] = $d;
+			if ( ! empty( $d['id'] ) ) {
+				$by_id[ (string) $d['id'] ] = $d;
 			}
 		}
-		if ( empty( $defs ) ) {
-			return null;
+		if ( class_exists( 'WSErgo_City_Defaults' ) ) {
+			foreach ( WSErgo_City_Defaults::default_indicator_definitions() as $row ) {
+				if ( ! is_array( $row ) ) {
+					continue;
+				}
+				$id = isset( $row['id'] ) ? sanitize_key( (string) $row['id'] ) : '';
+				if ( $id === '' || ! array_key_exists( $id, $raw_by_indicator_id ) ) {
+					continue;
+				}
+				if ( isset( $by_id[ $id ] ) ) {
+					continue;
+				}
+				$dim = isset( $row['dimension'] ) ? sanitize_key( (string) $row['dimension'] ) : '';
+				if ( ! in_array( $dim, WSErgo_Model::DIMENSION_KEYS, true ) ) {
+					continue;
+				}
+				$dir = isset( $row['direction'] ) && 'lower_better' === $row['direction'] ? 'lower_better' : 'higher_better';
+				$by_id[ $id ] = [
+					'id'        => $id,
+					'label'     => isset( $row['label'] ) ? sanitize_text_field( (string) $row['label'] ) : $id,
+					'dimension' => $dim,
+					'unit'      => isset( $row['unit'] ) ? sanitize_text_field( (string) $row['unit'] ) : '',
+					'vmin'      => isset( $row['vmin'] ) ? (float) str_replace( ',', '.', (string) $row['vmin'] ) : 0.0,
+					'vmax'      => isset( $row['vmax'] ) ? (float) str_replace( ',', '.', (string) $row['vmax'] ) : 100.0,
+					'direction' => $dir,
+					'weight'    => isset( $row['weight'] ) ? max( 0.0, (float) str_replace( ',', '.', (string) $row['weight'] ) ) : 1.0,
+				];
+			}
 		}
+		return array_values( $by_id );
+	}
+
+	/**
+	 * @param array<int, array{id:string,label:string,dimension:string,unit:string,vmin:float,vmax:float,direction:string,weight:float}> $defs
+	 * @param array<string, float>                                                                                                    $raw_by_indicator_id
+	 */
+	private static function compute_dimension_from_def_list( array $defs, array $raw_by_indicator_id, string $dimension ): ?float {
 		$parts = [];
 		foreach ( $defs as $def ) {
+			if ( ( $def['dimension'] ?? '' ) !== $dimension ) {
+				continue;
+			}
 			if ( ! isset( $raw_by_indicator_id[ $def['id'] ] ) ) {
 				continue;
 			}
@@ -205,15 +249,32 @@ class WSErgo_Indicators {
 	}
 
 	/**
+	 * Взвешенное среднее по измерению из переданных сырых значений (без мета записи).
+	 *
+	 * @param array<string, float> $raw_by_indicator_id
+	 */
+	public static function compute_dimension_from_raw_map( array $raw_by_indicator_id, string $dimension ): ?float {
+		if ( empty( $raw_by_indicator_id ) ) {
+			return null;
+		}
+		$defs = self::get_definitions_for_raw_map( $raw_by_indicator_id );
+		return self::compute_dimension_from_def_list( $defs, $raw_by_indicator_id, $dimension );
+	}
+
+	/**
 	 * Шесть осей 0–100 из карты сырых значений (только измерения с данными).
 	 *
 	 * @param array<string, float> $raw_by_indicator_id
 	 * @return array<string, float>
 	 */
 	public static function build_dimension_scores_from_raw_map( array $raw_by_indicator_id ): array {
+		if ( empty( $raw_by_indicator_id ) ) {
+			return [];
+		}
+		$defs   = self::get_definitions_for_raw_map( $raw_by_indicator_id );
 		$scores = [];
 		foreach ( WSErgo_Model::DIMENSION_KEYS as $dim ) {
-			$calc = self::compute_dimension_from_raw_map( $raw_by_indicator_id, $dim );
+			$calc = self::compute_dimension_from_def_list( $defs, $raw_by_indicator_id, $dim );
 			if ( $calc !== null ) {
 				$scores[ $dim ] = $calc;
 			}
