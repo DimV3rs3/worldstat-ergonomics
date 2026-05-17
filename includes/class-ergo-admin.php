@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * Метабоксы, настройки, импорт CSV, подменю World Statistics.
  *
@@ -139,6 +139,15 @@ class WSErgo_Admin {
 			[
 				'type'              => 'array',
 				'sanitize_callback' => [ $this, 'sanitize_city_field_map' ],
+				'default'           => [],
+			]
+		);
+		register_setting(
+			'wsergo_settings',
+			WSErgo_Settings::OPTION_CITY_CSV_BINDINGS,
+			[
+				'type'              => 'array',
+				'sanitize_callback' => [ $this, 'sanitize_city_csv_bindings' ],
 				'default'           => [],
 			]
 		);
@@ -643,7 +652,12 @@ class WSErgo_Admin {
 			$stored = get_option( WSErgo_Settings::OPTION_MACRO_CLUSTER_FEATURES, null );
 			$input  = is_array( $stored ) ? $stored : [];
 		}
-		$allow = array_flip( WSErgo_Country_Macro_Calculator::macro_signal_allowlist() );
+		$allow = array_flip(
+			array_merge(
+				WSErgo_Country_Macro_Calculator::macro_signal_allowlist(),
+				WSErgo_Country_Macro_Calculator::default_cluster_features()
+			)
+		);
 		$out   = array();
 		foreach ( $input as $x ) {
 			$k = sanitize_key( (string) $x );
@@ -1042,6 +1056,17 @@ class WSErgo_Admin {
 			];
 		}
 		return array_values( $out );
+	}
+
+	/**
+	 * @param mixed $input
+	 * @return array<string, int>
+	 */
+	public function sanitize_city_csv_bindings( $input ): array {
+		if ( ! is_array( $input ) || ! class_exists( 'WSErgo_Settings' ) ) {
+			return [];
+		}
+		return WSErgo_Settings::normalize_city_csv_bindings_option( $input );
 	}
 
 	/**
@@ -2051,8 +2076,8 @@ class WSErgo_Admin {
 						if(!\$a.length){ return; }
 						$('.wsergo-city-inner-nav a').removeClass('nav-tab-active');
 						\$a.addClass('nav-tab-active');
-						var \$f = $('form.wsergo-settings-form');
-						\$f.find('.wsergo-tab-panel-city').hide();
+						var \$f = $('#wsergo-panel-city form.wsergo-settings-form');
+						\$f.find('.wsergo-city-tab-panel').hide();
 						\$f.find('#' + id).show();
 					}
 					function wsergoActivateTerritoryInnerTab(id){
@@ -2077,10 +2102,14 @@ class WSErgo_Admin {
 							wsergoActivateInnerTab('tab-data');
 							return;
 						}
-						if(h === '#ergo-city' || h === '#tab-city-data' || h === '#tab-city-formula'){
+						if(h === '#ergo-city'){
 							wsergoActivateScope('city');
-							var cid = (h === '#tab-city-data' || h === '#tab-city-formula') ? h.replace('#','') : 'tab-city-data';
-							wsergoActivateCityInnerTab(cid);
+							wsergoActivateCityInnerTab('city-tab-overview');
+							return;
+						}
+						if(h.indexOf('#city-tab-') === 0){
+							wsergoActivateScope('city');
+							wsergoActivateCityInnerTab(h.replace('#',''));
 							return;
 						}
 						wsergoActivateScope('country');
@@ -2099,7 +2128,7 @@ class WSErgo_Admin {
 							wsergoReplaceHash('#ergo-country');
 						} else if(scope === 'city'){
 							wsergoActivateScope('city');
-							wsergoActivateCityInnerTab('tab-city-data');
+							wsergoActivateCityInnerTab('city-tab-overview');
 							wsergoReplaceHash('#ergo-city');
 						} else if(scope === 'territory'){
 							wsergoActivateScope('territory');
@@ -2140,7 +2169,7 @@ class WSErgo_Admin {
 							wsergoReplaceHash(href);
 							return;
 						}
-						if(href.indexOf('#tab-city-') === 0){
+						if(href.indexOf('#city-tab-') === 0){
 							wsergoActivateScope('city');
 							wsergoActivateCityInnerTab(href.substring(1));
 							wsergoReplaceHash(href);
@@ -2156,11 +2185,44 @@ class WSErgo_Admin {
 							if(r.success){ $('#wsergo-formula-test-result').text('E ≈ ' + r.data.value); } else { $('#wsergo-formula-test-result').text(r.data.message || 'Error'); }
 						});
 					});
-					$('#wsergo-test-formula-btn-city').on('click', function(){
-						var formula = $('#wsergo_test_formula_inline_city').length ? $('#wsergo_test_formula_inline_city').val() : $('textarea[name=\"wsergo_city_models[0][leaf_formula]\"]').first().val();
-						$.post(ajaxurl, { action:'wsergo_test_city_formula', nonce:'" . esc_js( wp_create_nonce( 'wsergo_settings_ajax' ) ) . "', formula: formula }, function(r){
-							if(r.success){ $('#wsergo-formula-test-result-city').text('E ≈ ' + r.data.value); } else { $('#wsergo-formula-test-result-city').text(r.data.message || 'Error'); }
+					$('#wsergo-city-test-formula-btn').on('click', function(){
+						var formula = $('#wsergo_city_test_formula_inline').length ? $('#wsergo_city_test_formula_inline').val() : $('textarea[name=\"wsergo_models[0][leaf_formula]\"]').first().val();
+						$.post(ajaxurl, { action:'wsergo_test_formula', nonce:'" . esc_js( wp_create_nonce( 'wsergo_settings_ajax' ) ) . "', formula: formula }, function(r){
+							if(r.success){ $('#wsergo-city-formula-test-result').text('E ≈ ' + r.data.value); } else { $('#wsergo-city-formula-test-result').text(r.data.message || 'Error'); }
 						});
+					});
+					$(document).on('click', '#wsergo-add-city-map-row', function(){
+						var \$rows = $('#wsergo-city-map-rows');
+						var \$tpl = \$rows.find('tr.wsergo-city-map-template').first();
+						var \$n;
+						if(\$tpl.length){
+							\$n = \$tpl.clone().removeClass('wsergo-city-map-template').removeAttr('style').show();
+						}else{
+							var \$last = \$rows.find('tr').last();
+							if(!\$last.length){ return; }
+							\$n = \$last.clone();
+						}
+						\$n.find('select').prop('selectedIndex', 0);
+						if(\$tpl.length){ \$tpl.before(\$n); } else { \$rows.append(\$n); }
+					});
+					$(document).on('click', '#wsergo-city-add-indicator-row', function(){
+						var \$rows = $('#wsergo-city-indicator-rows');
+						var \$tpl = \$rows.find('tr.wsergo-city-indicator-template').first();
+						var \$n;
+						if(\$tpl.length){
+							\$n = \$tpl.clone().removeClass('wsergo-city-indicator-template').removeAttr('style').show();
+						}else{
+							var \$last = \$rows.find('tr').last();
+							if(!\$last.length){ return; }
+							\$n = \$last.clone();
+						}
+						\$n.find('input[type=text]').val('');
+						\$n.find('select[name\$=\"[dimension]\"]').each(function(){ this.selectedIndex = 0; });
+						\$n.find('select[name\$=\"[direction]\"]').each(function(){ this.selectedIndex = 0; });
+						\$n.find('input[name\$=\"[vmin]\"]').val('0');
+						\$n.find('input[name\$=\"[vmax]\"]').val('100');
+						\$n.find('input[name\$=\"[weight]\"]').val('1');
+						if(\$tpl.length){ \$tpl.before(\$n); } else { \$rows.append(\$n); }
 					});
 					function wsergoMacroParseManual(v){
 						var s = (v===null||v===undefined)?'':String(v).trim().replace(',','.');
@@ -2626,6 +2688,16 @@ class WSErgo_Admin {
 		$cf_for_checkboxes    = count( $stored_cf ) >= 2 ? $stored_cf : $default_cf;
 		$macro_axis_resolved = WSErgo_Settings::get_macro_axis_terms_resolved();
 		$signals_ui          = class_exists( 'WSErgo_Country_Macro_Calculator' ) ? WSErgo_Country_Macro_Calculator::macro_signal_allowlist() : [];
+		$signals_ui_kmeans   = array_values(
+			array_unique(
+				array_merge(
+					$default_cf,
+					$signals_ui,
+					class_exists( 'WSErgo_Country_Macro_Calculator' ) ? WSErgo_Country_Macro_Calculator::get_cached_macro_signal_allowlist() : []
+				)
+			)
+		);
+		sort( $signals_ui_kmeans );
 		$macro_axis_labels   = class_exists( 'WSErgo_Country_Macro_Calculator' ) ? WSErgo_Country_Macro_Calculator::macro_axis_labels_ru() : [];
 		$macro_extra_signals_text = class_exists( 'WSErgo_Settings' ) ? (string) get_option( WSErgo_Settings::OPTION_MACRO_EXTRA_SIGNALS_TEXT, '' ) : '';
 		$data_labels_saved     = class_exists( 'WSErgo_Settings' ) ? WSErgo_Settings::get_data_labels_ru() : [];
@@ -2690,8 +2762,22 @@ class WSErgo_Admin {
 		$city_field_map_rows[] = [ 'source' => '', 'indicator_id' => '' ];
 		$city_field_map_rows[] = [ 'source' => '', 'indicator_id' => '' ];
 		$city_source_choices  = class_exists( 'WSErgo_City_Bridge' ) ? WSErgo_City_Bridge::get_source_choices() : [];
+		$weights              = get_option( 'wsergo_dimension_weights', WSErgo_Model::get_default_weights() );
+		if ( ! is_array( $weights ) ) {
+			$weights = WSErgo_Model::get_default_weights();
+		}
+		$labels               = WSErgo_Model::get_dimension_labels();
+		$agg                  = WSErgo_Settings::get_aggregation();
+		$city_field_map       = array_values( class_exists( 'WSErgo_City_Bridge' ) ? WSErgo_City_Bridge::get_field_map() : [] );
+		$city_csv_bindings    = class_exists( 'WSErgo_Settings' ) ? WSErgo_Settings::get_city_csv_bindings() : [];
+		$source_choices       = $city_source_choices;
+		$csv_files            = [];
+		if ( class_exists( 'WorldStat_Uploaded_Csv' ) && WorldStat_Uploaded_Csv::table_exists() ) {
+			$csv_files = WorldStat_Uploaded_Csv::list_files();
+		}
 		$city_dim_labels       = WSErgo_Model::get_dimension_labels();
 		$indicator_defs_stored = WSErgo_Indicators::get_definitions();
+		$indicator_defs       = array_values( $indicator_defs_stored );
 		$indicator_form_rows   = $indicator_defs_stored;
 		for ( $__pad = count( $indicator_form_rows ); $__pad < 8; $__pad++ ) {
 			$indicator_form_rows[] = [
@@ -2797,7 +2883,7 @@ class WSErgo_Admin {
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Эргономичность', 'worldstat-ergonomics' ); ?></h1>
 			<p class="description" style="margin-top:0;">
-				<?php esc_html_e( 'Страновый индекс — макроданные CSV, кластеризация k-means и шесть критериев F…Ct в блоке «Эргономичность страны». Городской листовой E — по мета и Blocks & Roads wsp_city, карте полей и листовым показателям; отдельно для города — своя матрица макро-признаков, своя модель DSL и k_* для сборки E из шести осей (настройки на вкладках города). Территория — модель сводного индекса для квартала (wsp_district) по данным wsdistrict_* и весам критериев.', 'worldstat-ergonomics' ); ?>
+				<?php esc_html_e( 'Страновый индекс — макроданные CSV, k-means и шесть критериев F…Ct в блоке «Эргономичность страны». Городской листовой E — по мета и Blocks & Roads wsp_city, карте полей, показателям и DSL (вкладка «Эргономичность города»). Территория — модель сводного индекса для квартала (wsp_district) по данным wsdistrict_* и весам критериев.', 'worldstat-ergonomics' ); ?>
 			</p>
 
 			<h2 class="nav-tab-wrapper wsergo-ergo-scope-nav" style="margin-bottom:4px;">
@@ -3047,8 +3133,20 @@ class WSErgo_Admin {
 						<button type="button" class="button wsergo-auto-tune-clusters-save" data-scope="country"><?php esc_html_e( 'Автоподбор и сохранить', 'worldstat-ergonomics' ); ?></button>
 						<span class="wsergo-auto-tune-status wsp-muted" style="margin-left:8px;"></span>
 					</p>
-					<div id="wsergo-cluster-features-country" class="wsergo-cluster-features-host" data-scope="country" style="max-height:220px;overflow:auto;border:1px solid #c3c4c7;padding:10px;background:#fff;">
-						<p class="wsp-muted wsergo-cluster-features-loading"><?php esc_html_e( 'Загрузка списка признаков…', 'worldstat-ergonomics' ); ?></p>
+										<div id="wsergo-cluster-features-country" class="wsergo-cluster-features-host" data-scope="country" style="max-height:220px;overflow:auto;border:1px solid #c3c4c7;padding:10px;background:#fff;">
+						<?php if ( empty( $signals_ui_kmeans ) ) : ?>
+							<p class="description"><?php esc_html_e( 'Нет признаков для выбора: загрузите CSV в World Statistics → Данные CSV или добавьте ключи в блоке «Дополнительные ключи признаков» ниже. Пока отмечено меньше двух признаков, при расчёте используется встроенный набор плагина.', 'worldstat-ergonomics' ); ?></p>
+						<?php else : ?>
+							<div class="wsergo-cluster-features-list" data-scope="country">
+								<?php foreach ( $signals_ui_kmeans as $sig ) : ?>
+									<label style="display:block;margin:.35em 0;">
+										<input type="checkbox" name="<?php echo esc_attr( WSErgo_Settings::OPTION_MACRO_CLUSTER_FEATURES ); ?>[]" value="<?php echo esc_attr( $sig ); ?>" <?php checked( in_array( $sig, $cf_for_checkboxes, true ) ); ?> />
+										<strong><?php echo esc_html( class_exists( 'WSErgo_Country_Macro_Calculator' ) ? WSErgo_Country_Macro_Calculator::data_label_ru( $sig ) : $sig ); ?></strong>
+										<code style="margin-left:6px;"><?php echo esc_html( $sig ); ?></code>
+									</label>
+								<?php endforeach; ?>
+							</div>
+						<?php endif; ?>
 					</div>
 					<div id="wsergo-cluster-tune-report-country" class="wsergo-cluster-tune-report" style="display:none;margin-top:10px;padding:10px;border:1px solid #c3c4c7;background:#fff;max-height:180px;overflow:auto;"></div>
 					<table class="form-table" role="presentation">

@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * Вкладка страны и блок на странице города.
  *
@@ -941,78 +941,10 @@ class WSErgo_Renderer {
 			$headers[] = __( 'Кварталов', 'worldstat-ergonomics' );
 		}
 
-		$max_explorer = (int) apply_filters( 'wsergo_city_leaf_explorer_max_cities', 600 );
-		$cities_expl  = $cities;
-		usort(
-			$cities_expl,
-			static function ( $a, $b ) {
-				return strcasecmp( (string) ( $a['name'] ?? '' ), (string) ( $b['name'] ?? '' ) );
-			}
-		);
-		$truncated = false;
-		if ( count( $cities_expl ) > $max_explorer ) {
-			$cities_expl = array_slice( $cities_expl, 0, $max_explorer );
-			$truncated    = true;
+		if ( class_exists( 'WSErgo_Renderer_City_Explorer' ) ) {
+			WSErgo_Renderer_City_Explorer::render_country_city_explorer_block( $iso2, $cities );
 		}
 
-		self::print_city_leaf_explorer_assets_once();
-
-		if ( $defer_explorer ) {
-			self::print_country_tab_lazy_scripts_once();
-			echo '<section class="wsp-section wsergo-city-leaf-explorer wsergo-city-leaf-explorer--lazy" id="' . esc_attr( $explorer_uid ) . '"';
-			echo ' data-wsergo-explorer-lazy="1" data-iso2="' . esc_attr( $iso2 ) . '"';
-			echo ' aria-labelledby="' . esc_attr( $explorer_uid ) . '-title">';
-			echo '<p class="wsp-muted wsergo-city-leaf-explorer__lazy-status">' . esc_html__( 'Исследователь городов загрузится при прокрутке…', 'worldstat-ergonomics' ) . '</p>';
-		} else {
-			$city_payload = [];
-			foreach ( $cities_expl as $c ) {
-				$cid = (int) $c['id'];
-				$city_payload[ (string) $cid ] = WSErgo_Data::get_city_leaf_public_detail( $cid );
-			}
-
-			$regression = class_exists( 'WSErgo_City_Regression' )
-				? WSErgo_City_Regression::analyze_country_payload( $city_payload )
-				: [ 'usable' => false, 'notice' => __( 'Модуль регрессии недоступен.', 'worldstat-ergonomics' ) ];
-
-			$payload = [
-				'axisLabels'     => WSErgo_Model::get_dimension_labels(),
-				'dimensionOrder' => WSErgo_Model::DIMENSION_KEYS,
-				'cities'         => $city_payload,
-				'regression'     => $regression,
-			];
-			$json = wp_json_encode( $payload, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP );
-			if ( false === $json ) {
-				$json = '{}';
-			}
-
-			echo '<section class="wsp-section wsergo-city-leaf-explorer" id="' . esc_attr( $explorer_uid ) . '" aria-labelledby="' . esc_attr( $explorer_uid ) . '-title">';
-			echo '<script type="application/json" class="wsergo-city-leaf-explorer__json">' . $json . '</script>';
-		}
-		echo '<h3 class="wsp-section-title" id="' . esc_attr( $explorer_uid ) . '-title">' . esc_html__( 'Город: показатели, регрессия и рекомендации', 'worldstat-ergonomics' ) . '</h3>';
-		if ( ! $defer_explorer ) {
-			echo '<p class="wsergo-city-leaf-explorer__intro">' . esc_html__( 'Выберите город в списке: таблицы показателей и осей, рекомендации по перцентилям внутри блока «Показатели по карте полей», затем регрессия листового E по выборке городов страны.', 'worldstat-ergonomics' ) . '</p>';
-		}
-		if ( ! $defer_explorer && $truncated ) {
-			echo '<p class="description wsergo-city-leaf-explorer__trunc">' . esc_html(
-				sprintf(
-					/* translators: %d: max cities in explorer */
-					__( 'В списке только первые %d городов по алфавиту (ограничение производительности). Полный перечень — в таблице ниже.', 'worldstat-ergonomics' ),
-					$max_explorer
-				)
-			) . '</p>';
-		}
-		if ( ! $defer_explorer ) {
-			echo '<div class="wsergo-city-leaf-explorer__controls">';
-		echo '<label for="' . esc_attr( $explorer_uid ) . '-sel" class="wsergo-city-leaf-explorer__label">' . esc_html__( 'Город', 'worldstat-ergonomics' ) . '</label>';
-		echo '<select id="' . esc_attr( $explorer_uid ) . '-sel" class="wsp-select wsergo-city-leaf-explorer__select">';
-		echo '<option value="">' . esc_html__( '— Выберите город —', 'worldstat-ergonomics' ) . '</option>';
-		foreach ( $cities_expl as $c ) {
-			echo '<option value="' . esc_attr( (string) (int) $c['id'] ) . '">' . esc_html( (string) ( $c['name'] ?? '' ) ) . '</option>';
-		}
-		echo '</select></div>';
-			echo '<div class="wsergo-city-leaf-explorer__panel" hidden></div>';
-		}
-		echo '</section>';
 
 		WorldStat_UI::table(
 			[

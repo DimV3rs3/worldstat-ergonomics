@@ -64,6 +64,7 @@ require_once WSERGO_DIR . 'includes/class-ergo-macro-cluster-optimizer.php';
 require_once WSERGO_DIR . 'includes/class-ergo-data.php';
 require_once WSERGO_DIR . 'includes/class-ergo-city-regression.php';
 require_once WSERGO_DIR . 'includes/class-ergo-renderer.php';
+require_once WSERGO_DIR . 'includes/class-ergo-renderer-city-explorer.php';
 require_once WSERGO_DIR . 'includes/class-ergo-admin.php';
 require_once WSERGO_DIR . 'includes/class-ergo-district-metrics.php';
 require_once WSERGO_DIR . 'includes/class-ergo-district-neural.php';
@@ -192,6 +193,10 @@ add_action( 'wp_ajax_wsergo_save_district_criteria_weights', 'wsergo_save_distri
 add_action( 'wp_ajax_wsergo_retrain_neural_networks', 'wsergo_retrain_neural_networks' );
 add_action( 'wp_ajax_wsergo_load_country_city_explorer', [ 'WSErgo_Renderer', 'ajax_load_country_city_explorer' ] );
 add_action( 'wp_ajax_nopriv_wsergo_load_country_city_explorer', [ 'WSErgo_Renderer', 'ajax_load_country_city_explorer' ] );
+add_action( 'wp_ajax_wsergo_city_explorer_payload', [ 'WSErgo_Renderer_City_Explorer', 'ajax_city_explorer_payload' ] );
+add_action( 'wp_ajax_nopriv_wsergo_city_explorer_payload', [ 'WSErgo_Renderer_City_Explorer', 'ajax_city_explorer_payload' ] );
+add_action( 'wp_ajax_wsergo_city_compare', [ 'WSErgo_Renderer_City_Explorer', 'ajax_city_compare' ] );
+add_action( 'wp_ajax_nopriv_wsergo_city_compare', [ 'WSErgo_Renderer_City_Explorer', 'ajax_city_compare' ] );
 add_action( 'wp_ajax_wsergo_load_country_city_macro', [ 'WSErgo_Renderer', 'ajax_load_country_city_macro' ] );
 add_action( 'wp_ajax_nopriv_wsergo_load_country_city_macro', [ 'WSErgo_Renderer', 'ajax_load_country_city_macro' ] );
 add_action( 'wp_ajax_wsergo_auto_tune_macro_clusters', 'wsergo_ajax_auto_tune_macro_clusters' );
@@ -239,9 +244,20 @@ function wsergo_ajax_load_cluster_features_ui(): void {
 		? WSErgo_Country_Macro_Calculator::default_cluster_features()
 		: array();
 	$cf_for_checkboxes = count( $stored_cf ) >= 2 ? $stored_cf : $default_cf;
-	$signals_ui        = ( 'city' === $scope )
+	$signals_ui = ( 'city' === $scope )
 		? WSErgo_Settings::macro_signal_allowlist_city()
 		: WSErgo_Country_Macro_Calculator::get_cached_macro_signal_allowlist();
+	if ( 'country' === $scope && class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+		$signals_ui = array_values(
+			array_unique(
+				array_merge(
+					WSErgo_Country_Macro_Calculator::default_cluster_features(),
+					$signals_ui
+				)
+			)
+		);
+		sort( $signals_ui );
+	}
 
 	ob_start();
 	echo '<div class="wsergo-cluster-features-list" data-scope="' . esc_attr( $scope ) . '">';

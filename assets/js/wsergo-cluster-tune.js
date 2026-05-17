@@ -25,7 +25,20 @@
 
 	function loadFeaturesUi(scope, onReady) {
 		var $host = hostEl(scope);
-		if (!$host.length || !cfg.ajaxUrl) {
+		if (!$host.length) {
+			if (typeof onReady === 'function') {
+				onReady();
+			}
+			return;
+		}
+		if ($host.find('input[type="checkbox"]').length) {
+			loadedScopes[scope] = 'done';
+			if (typeof onReady === 'function') {
+				onReady();
+			}
+			return;
+		}
+		if (!cfg.ajaxUrl) {
 			if (typeof onReady === 'function') {
 				onReady();
 			}
