@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Панель настроек «Эргономичность страны».
  * @package WorldStatErgonomics
