@@ -1,0 +1,14 @@
+/* WorldStat Ergonomics — admin */
+.wsergo-row input.widefat {
+	max-width: 28rem;
+}
+
+/* Панели уровней (страна / город / территория) */
+.wsergo-scope-panel {
+	display: none;
+	margin-top: 8px;
+}
+
+.wsergo-scope-panel.wsergo-scope-panel--active {
+	display: block !important;
+}
