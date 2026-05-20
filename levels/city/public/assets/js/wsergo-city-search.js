@@ -10,45 +10,33 @@
 		return d.innerHTML;
 	}
 
+	function decodeHtml( s ) {
+		var str = s == null ? '' : String( s );
+		if ( str.indexOf( '&' ) < 0 ) {
+			return str;
+		}
+		var t = document.createElement( 'textarea' );
+		t.innerHTML = str;
+		return t.value;
+	}
+
 	function norm( s ) {
-		return String( s || '' )
+		return decodeHtml( s )
 			.toLowerCase()
 			.replace( /\s+/g, ' ' )
 			.trim();
 	}
 
 	function cityLabel( c ) {
-		var n = c.name || '';
+		var n = decodeHtml( c.name || '' );
 		if ( c.country_name ) {
-			n += n ? ' (' + c.country_name + ')' : String( c.country_name );
+			n += n ? ' (' + decodeHtml( c.country_name ) + ')' : decodeHtml( c.country_name );
 		}
 		return n;
 	}
 
-	/**
-	 * @param {HTMLElement} root
-	 * @param {Object<string,object>} index
-	 * @param {{placeholder?:string,selectLabel?:string,emptyLabel?:string,allowEmpty?:boolean,onChange?:Function}} opts
-	 */
-	function initCitySearch( root, index, opts ) {
-		if ( ! root ) {
-			return;
-		}
-		opts = opts || {};
-
-		var trigger = root.querySelector( '.wsergo-city-select__trigger' );
-		var labelEl = root.querySelector( '.wsergo-city-select__label' );
-		var panel = root.querySelector( '.wsergo-city-select__panel' );
-		var searchInput = root.querySelector( '.wsergo-city-select__search' );
-		var list = root.querySelector( '.wsergo-city-select__list' );
-		var hidden = root.querySelector( '.wsergo-city-search__id' );
-
-		if ( ! trigger || ! labelEl || ! panel || ! searchInput || ! list || ! hidden ) {
-			return;
-		}
-
-		var defaultLabel = opts.selectLabel || opts.placeholder || '—';
-		var entries = Object.keys( index || {} )
+	function buildEntries( index ) {
+		return Object.keys( index || {} )
 			.map( function ( id ) {
 				var c = index[ id ];
 				if ( ! c ) {
@@ -66,6 +54,50 @@
 			.sort( function ( a, b ) {
 				return a.label.localeCompare( b.label, 'ru' );
 			} );
+	}
+
+	/**
+	 * @param {HTMLElement} root
+	 * @param {Object<string,object>} index
+	 * @param {{placeholder?:string,selectLabel?:string,emptyLabel?:string,allowEmpty?:boolean,onChange?:Function}} opts
+	 */
+	function initCitySearch( root, index, opts ) {
+		if ( ! root ) {
+			return;
+		}
+
+		if ( typeof root._wsergoSearchTeardown === 'function' ) {
+			root._wsergoSearchTeardown();
+		}
+
+		opts = opts || {};
+		index = index || {};
+
+		var trigger = root.querySelector( '.wsergo-city-select__trigger' );
+		var labelEl = root.querySelector( '.wsergo-city-select__label' );
+		var panel = root.querySelector( '.wsergo-city-select__panel' );
+		var searchInput = root.querySelector( '.wsergo-city-select__search' );
+		var list = root.querySelector( '.wsergo-city-select__list' );
+		var hidden = root.querySelector( '.wsergo-city-search__id' );
+
+		if ( ! trigger || ! labelEl || ! panel || ! searchInput || ! list || ! hidden ) {
+			return;
+		}
+
+		var defaultLabel = opts.selectLabel || opts.placeholder || '—';
+		var entries = null;
+		var destroyed = false;
+
+		function getEntries() {
+			if ( ! entries ) {
+				entries = buildEntries( index );
+			}
+			return entries;
+		}
+
+		function refreshEntries() {
+			entries = buildEntries( index );
+		}
 
 		function closePanel() {
 			panel.hidden = true;
@@ -80,7 +112,9 @@
 			searchInput.value = '';
 			renderList( '' );
 			setTimeout( function () {
-				searchInput.focus();
+				if ( ! destroyed ) {
+					searchInput.focus();
+				}
 			}, 0 );
 		}
 
@@ -95,9 +129,10 @@
 
 		function renderList( q ) {
 			var nq = norm( q );
-			var items = entries;
+			var all = getEntries();
+			var items = all;
 			if ( nq ) {
-				items = entries.filter( function ( e ) {
+				items = all.filter( function ( e ) {
 					return e.search.indexOf( nq ) >= 0;
 				} );
 			}
@@ -131,7 +166,7 @@
 					if ( hidden.value === e.id ) {
 						li.classList.add( 'is-selected' );
 					}
-					li.innerHTML = esc( e.label );
+					li.textContent = e.label;
 					li.addEventListener( 'mousedown', function ( ev ) {
 						ev.preventDefault();
 						pick( e.id, e.label );
@@ -141,34 +176,59 @@
 			}
 		}
 
-		searchInput.placeholder = opts.placeholder || searchInput.placeholder || '';
-		searchInput.setAttribute( 'autocomplete', 'off' );
-		labelEl.textContent = defaultLabel;
-
-		trigger.addEventListener( 'click', function ( ev ) {
+		function onTriggerClick( ev ) {
 			ev.preventDefault();
+			ev.stopPropagation();
 			if ( root.classList.contains( 'is-open' ) ) {
 				closePanel();
 			} else {
 				openPanel();
 			}
-		} );
+		}
 
-		searchInput.addEventListener( 'input', function () {
+		function onDocClick( ev ) {
+			if ( ! root.contains( ev.target ) ) {
+				closePanel();
+			}
+		}
+
+		function onSearchInput() {
 			renderList( searchInput.value );
-		} );
-		searchInput.addEventListener( 'keydown', function ( ev ) {
+		}
+
+		function onSearchKeydown( ev ) {
 			if ( ev.key === 'Escape' ) {
 				closePanel();
 				trigger.focus();
 			}
-		} );
+		}
 
-		document.addEventListener( 'click', function ( ev ) {
-			if ( ! root.contains( ev.target ) ) {
-				closePanel();
-			}
-		} );
+		searchInput.placeholder = opts.placeholder || searchInput.placeholder || '';
+		searchInput.setAttribute( 'autocomplete', 'off' );
+		labelEl.textContent = defaultLabel;
+
+		trigger.addEventListener( 'click', onTriggerClick );
+		searchInput.addEventListener( 'input', onSearchInput );
+		searchInput.addEventListener( 'keydown', onSearchKeydown );
+		document.addEventListener( 'click', onDocClick );
+
+		root._wsergoSearchTeardown = function () {
+			destroyed = true;
+			trigger.removeEventListener( 'click', onTriggerClick );
+			searchInput.removeEventListener( 'input', onSearchInput );
+			searchInput.removeEventListener( 'keydown', onSearchKeydown );
+			document.removeEventListener( 'click', onDocClick );
+			closePanel();
+			delete root._wsergoSearchTeardown;
+			delete root.wsergoSetCity;
+			delete root.wsergoClearCity;
+			delete root.wsergoUpdateCityIndex;
+		};
+
+		root.wsergoUpdateCityIndex = function ( newIndex ) {
+			index = newIndex || {};
+			refreshEntries();
+		};
 
 		root.wsergoSetCity = function ( id, silent ) {
 			if ( ! id || ! index[ id ] ) {
@@ -184,4 +244,9 @@
 	}
 
 	window.wsergoInitCitySearch = initCitySearch;
+	window.wsergoDestroyCitySearch = function ( root ) {
+		if ( root && typeof root._wsergoSearchTeardown === 'function' ) {
+			root._wsergoSearchTeardown();
+		}
+	};
 } )( window );

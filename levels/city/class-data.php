@@ -195,7 +195,7 @@ class WSErgo_City_Data {
 		if ( $city_id <= 0 ) {
 			return [];
 		}
-		$title = get_the_title( $city_id );
+		$title = html_entity_decode( (string) get_the_title( $city_id ), ENT_QUOTES | ENT_HTML5, 'UTF-8' );
 		$leaf  = self::get_city_ergo_index( $city_id );
 		$leaf_e = ( $leaf !== null && $leaf > 0 && is_finite( (float) $leaf ) ) ? round( (float) $leaf, 2 ) : 0.0;
 
@@ -390,8 +390,8 @@ class WSErgo_City_Data {
 			$leaf = (float) ( $row['leaf_e'] ?? 0 );
 			$cities[ (string) $cid ] = [
 				'id'           => $cid,
-				'name'         => (string) ( $row['name'] ?? '' ),
-				'country_name' => (string) ( $row['country_name'] ?? '' ),
+				'name'         => html_entity_decode( (string) ( $row['name'] ?? '' ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ),
+				'country_name' => html_entity_decode( (string) ( $row['country_name'] ?? '' ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ),
 				'country_iso2' => strtoupper( (string) ( $row['country_iso2'] ?? '' ) ),
 				'leaf_e'       => round( $leaf, 2 ),
 			];

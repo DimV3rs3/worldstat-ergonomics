@@ -33,6 +33,10 @@ class WSErgo_Country_Renderer {
 		if ( ! $need_country_css ) {
 			return;
 		}
+		if ( class_exists( 'WSErgo_City_Explorer' ) ) {
+			WSErgo_City_Explorer::enqueue_explorer_assets( true );
+			return;
+		}
 		$css_rel = 'public/assets/css/ergo-country-public.css';
 		wp_enqueue_style(
 			'wsergo-country-public',
@@ -237,6 +241,10 @@ class WSErgo_Country_Renderer {
 	 * Подключить стили блока страны/городов при выводе исследователя (вкладка платформы часто не is_singular страны).
 	 */
 	private static function enqueue_country_public_styles_for_explorer(): void {
+		if ( class_exists( 'WSErgo_City_Explorer' ) ) {
+			WSErgo_City_Explorer::enqueue_explorer_assets( true );
+			return;
+		}
 		if ( wp_style_is( 'wsergo-country-public', 'enqueued' ) || wp_style_is( 'wsergo-country-public', 'done' ) ) {
 			return;
 		}
@@ -290,6 +298,10 @@ class WSErgo_Country_Renderer {
 			return;
 		}
 		self::$city_leaf_explorer_assets_printed = true;
+		if ( class_exists( 'WSErgo_City_Explorer' ) ) {
+			self::enqueue_country_public_styles_for_explorer();
+			return;
+		}
 		self::enqueue_country_public_styles_for_explorer();
 		self::print_city_leaf_explorer_reg_inline_css_once();
 		$l10n = [
@@ -762,6 +774,87 @@ class WSErgo_Country_Renderer {
 	}
 
 	/**
+	 * Запасной исследователь (если WSErgo_City_Explorer недоступен).
+	 *
+	 * @param string              $iso2
+	 * @param string              $explorer_uid
+	 * @param array<int, array>   $cities
+	 * @param bool                $defer_explorer
+	 */
+	private static function render_legacy_city_leaf_explorer( string $iso2, string $explorer_uid, array $cities, bool $defer_explorer ): void {
+		$max_explorer = (int) apply_filters( 'wsergo_city_leaf_explorer_max_cities', 600 );
+		$cities_expl  = $cities;
+		usort(
+			$cities_expl,
+			static function ( $a, $b ) {
+				return strcasecmp( (string) ( $a['name'] ?? '' ), (string) ( $b['name'] ?? '' ) );
+			}
+		);
+		$truncated = false;
+		if ( count( $cities_expl ) > $max_explorer ) {
+			$cities_expl = array_slice( $cities_expl, 0, $max_explorer );
+			$truncated   = true;
+		}
+
+		if ( $defer_explorer ) {
+			self::print_country_tab_lazy_scripts_once();
+			echo '<section class="wsp-section wsergo-city-leaf-explorer wsergo-city-leaf-explorer--lazy" id="' . esc_attr( $explorer_uid ) . '"';
+			echo ' data-wsergo-explorer-lazy="1" data-iso2="' . esc_attr( $iso2 ) . '"';
+			echo ' aria-labelledby="' . esc_attr( $explorer_uid ) . '-title">';
+			echo '<p class="wsp-muted wsergo-city-leaf-explorer__lazy-status">' . esc_html__( 'Исследователь городов загрузится при прокрутке…', 'worldstat-ergonomics' ) . '</p>';
+		} else {
+			$city_payload = array();
+			foreach ( $cities_expl as $c ) {
+				$cid = (int) $c['id'];
+				$city_payload[ (string) $cid ] = WSErgo_Country_Data::get_city_leaf_public_detail( $cid );
+			}
+
+			$regression = class_exists( 'WSErgo_City_Regression' )
+				? WSErgo_City_Regression::analyze_country_payload( $city_payload )
+				: array( 'usable' => false, 'notice' => __( 'Модуль регрессии недоступен.', 'worldstat-ergonomics' ) );
+
+			$payload = array(
+				'axisLabels'     => WSErgo_Model::get_dimension_labels(),
+				'dimensionOrder' => WSErgo_Model::DIMENSION_KEYS,
+				'cities'         => $city_payload,
+				'regression'     => $regression,
+			);
+			$json = wp_json_encode( $payload, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP );
+			if ( false === $json ) {
+				$json = '{}';
+			}
+
+			echo '<section class="wsp-section wsergo-city-leaf-explorer" id="' . esc_attr( $explorer_uid ) . '" aria-labelledby="' . esc_attr( $explorer_uid ) . '-title">';
+			echo '<script type="application/json" class="wsergo-city-leaf-explorer__json">' . $json . '</script>';
+		}
+		echo '<h3 class="wsp-section-title" id="' . esc_attr( $explorer_uid ) . '-title">' . esc_html__( 'Город: показатели, регрессия и рекомендации', 'worldstat-ergonomics' ) . '</h3>';
+		if ( ! $defer_explorer ) {
+			echo '<p class="wsergo-city-leaf-explorer__intro">' . esc_html__( 'Выберите город в списке: таблицы показателей и осей, рекомендации по перцентилям внутри блока «Показатели по карте полей», затем регрессия листового E по выборке городов страны.', 'worldstat-ergonomics' ) . '</p>';
+		}
+		if ( ! $defer_explorer && $truncated ) {
+			echo '<p class="description wsergo-city-leaf-explorer__trunc">' . esc_html(
+				sprintf(
+					/* translators: %d: max cities in explorer */
+					__( 'В списке только первые %d городов по алфавиту (ограничение производительности). Полный перечень — в таблице ниже.', 'worldstat-ergonomics' ),
+					$max_explorer
+				)
+			) . '</p>';
+		}
+		if ( ! $defer_explorer ) {
+			echo '<div class="wsergo-city-leaf-explorer__controls">';
+			echo '<label for="' . esc_attr( $explorer_uid ) . '-sel" class="wsergo-city-leaf-explorer__label">' . esc_html__( 'Город', 'worldstat-ergonomics' ) . '</label>';
+			echo '<select id="' . esc_attr( $explorer_uid ) . '-sel" class="wsp-select wsergo-city-leaf-explorer__select">';
+			echo '<option value="">' . esc_html__( '— Выберите город —', 'worldstat-ergonomics' ) . '</option>';
+			foreach ( $cities_expl as $c ) {
+				echo '<option value="' . esc_attr( (string) (int) $c['id'] ) . '">' . esc_html( (string) ( $c['name'] ?? '' ) ) . '</option>';
+			}
+			echo '</select></div>';
+			echo '<div class="wsergo-city-leaf-explorer__panel" hidden></div>';
+		}
+		echo '</section>';
+	}
+
+	/**
 	 * Регионы и города под текстом на вкладке эргономичности страны.
 	 *
 	 * @param string $iso2           ISO2 страны.
@@ -839,78 +932,22 @@ class WSErgo_Country_Renderer {
 			$headers[] = __( 'Кварталов', 'worldstat-ergonomics' );
 		}
 
-		$max_explorer = (int) apply_filters( 'wsergo_city_leaf_explorer_max_cities', 600 );
-		$cities_expl  = $cities;
-		usort(
-			$cities_expl,
-			static function ( $a, $b ) {
-				return strcasecmp( (string) ( $a['name'] ?? '' ), (string) ( $b['name'] ?? '' ) );
-			}
-		);
-		$truncated = false;
-		if ( count( $cities_expl ) > $max_explorer ) {
-			$cities_expl = array_slice( $cities_expl, 0, $max_explorer );
-			$truncated    = true;
-		}
-
 		self::print_city_leaf_explorer_assets_once();
 
-		if ( $defer_explorer ) {
-			self::print_country_tab_lazy_scripts_once();
-			echo '<section class="wsp-section wsergo-city-leaf-explorer wsergo-city-leaf-explorer--lazy" id="' . esc_attr( $explorer_uid ) . '"';
-			echo ' data-wsergo-explorer-lazy="1" data-iso2="' . esc_attr( $iso2 ) . '"';
-			echo ' aria-labelledby="' . esc_attr( $explorer_uid ) . '-title">';
-			echo '<p class="wsp-muted wsergo-city-leaf-explorer__lazy-status">' . esc_html__( 'Исследователь городов загрузится при прокрутке…', 'worldstat-ergonomics' ) . '</p>';
+		if ( class_exists( 'WSErgo_City_Explorer' ) ) {
+			if ( $defer_explorer ) {
+				self::print_country_tab_lazy_scripts_once();
+				echo '<section class="wsp-section wsergo-city-explorer-lazy" id="' . esc_attr( $explorer_uid ) . '"';
+				echo ' data-wsergo-explorer-lazy="1" data-iso2="' . esc_attr( $iso2 ) . '">';
+				echo '<p class="wsp-muted wsergo-city-explorer-lazy__status">' . esc_html__( 'Блок «Анализ города» загрузится при прокрутке…', 'worldstat-ergonomics' ) . '</p>';
+				echo '</section>';
+			} else {
+				// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- HTML из capture_render_block().
+				echo WSErgo_City_Explorer::capture_render_block( $iso2, $cities );
+			}
 		} else {
-			$city_payload = [];
-			foreach ( $cities_expl as $c ) {
-				$cid = (int) $c['id'];
-				$city_payload[ (string) $cid ] = WSErgo_Country_Data::get_city_leaf_public_detail( $cid );
-			}
-
-			$regression = class_exists( 'WSErgo_City_Regression' )
-				? WSErgo_City_Regression::analyze_country_payload( $city_payload )
-				: [ 'usable' => false, 'notice' => __( 'Модуль регрессии недоступен.', 'worldstat-ergonomics' ) ];
-
-			$payload = [
-				'axisLabels'     => WSErgo_Model::get_dimension_labels(),
-				'dimensionOrder' => WSErgo_Model::DIMENSION_KEYS,
-				'cities'         => $city_payload,
-				'regression'     => $regression,
-			];
-			$json = wp_json_encode( $payload, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP );
-			if ( false === $json ) {
-				$json = '{}';
-			}
-
-			echo '<section class="wsp-section wsergo-city-leaf-explorer" id="' . esc_attr( $explorer_uid ) . '" aria-labelledby="' . esc_attr( $explorer_uid ) . '-title">';
-			echo '<script type="application/json" class="wsergo-city-leaf-explorer__json">' . $json . '</script>';
+			self::render_legacy_city_leaf_explorer( $iso2, $explorer_uid, $cities, $defer_explorer );
 		}
-		echo '<h3 class="wsp-section-title" id="' . esc_attr( $explorer_uid ) . '-title">' . esc_html__( 'Город: показатели, регрессия и рекомендации', 'worldstat-ergonomics' ) . '</h3>';
-		if ( ! $defer_explorer ) {
-			echo '<p class="wsergo-city-leaf-explorer__intro">' . esc_html__( 'Выберите город в списке: таблицы показателей и осей, рекомендации по перцентилям внутри блока «Показатели по карте полей», затем регрессия листового E по выборке городов страны.', 'worldstat-ergonomics' ) . '</p>';
-		}
-		if ( ! $defer_explorer && $truncated ) {
-			echo '<p class="description wsergo-city-leaf-explorer__trunc">' . esc_html(
-				sprintf(
-					/* translators: %d: max cities in explorer */
-					__( 'В списке только первые %d городов по алфавиту (ограничение производительности). Полный перечень — в таблице ниже.', 'worldstat-ergonomics' ),
-					$max_explorer
-				)
-			) . '</p>';
-		}
-		if ( ! $defer_explorer ) {
-			echo '<div class="wsergo-city-leaf-explorer__controls">';
-		echo '<label for="' . esc_attr( $explorer_uid ) . '-sel" class="wsergo-city-leaf-explorer__label">' . esc_html__( 'Город', 'worldstat-ergonomics' ) . '</label>';
-		echo '<select id="' . esc_attr( $explorer_uid ) . '-sel" class="wsp-select wsergo-city-leaf-explorer__select">';
-		echo '<option value="">' . esc_html__( '— Выберите город —', 'worldstat-ergonomics' ) . '</option>';
-		foreach ( $cities_expl as $c ) {
-			echo '<option value="' . esc_attr( (string) (int) $c['id'] ) . '">' . esc_html( (string) ( $c['name'] ?? '' ) ) . '</option>';
-		}
-		echo '</select></div>';
-			echo '<div class="wsergo-city-leaf-explorer__panel" hidden></div>';
-		}
-		echo '</section>';
 
 		WorldStat_UI::table(
 			[
@@ -1508,7 +1545,7 @@ class WSErgo_Country_Renderer {
 			function loadExplorer(sec) {
 				if (!sec || sec.getAttribute('data-explorer-loaded') === '1') return;
 				sec.setAttribute('data-explorer-loaded', '1');
-				var status = sec.querySelector('.wsergo-city-leaf-explorer__lazy-status');
+				var status = sec.querySelector('.wsergo-city-explorer-lazy__status') || sec.querySelector('.wsergo-city-leaf-explorer__lazy-status');
 				if (status) status.textContent = '<?php echo esc_js( __( 'Загрузка…', 'worldstat-ergonomics' ) ); ?>';
 				var fd = new FormData();
 				fd.append('action', 'wsergo_load_country_city_explorer');
@@ -1519,9 +1556,12 @@ class WSErgo_Country_Renderer {
 					.then(function(r){ return r.json(); })
 					.then(function(res){
 						if (res && res.success && res.data && res.data.html) {
-							var st = sec.querySelector('.wsergo-city-leaf-explorer__lazy-status');
+							var st = sec.querySelector('.wsergo-city-explorer-lazy__status') || sec.querySelector('.wsergo-city-leaf-explorer__lazy-status');
 							if (st) st.remove();
 							sec.insertAdjacentHTML('beforeend', res.data.html);
+							if (window.wsergoScanCityExplorers) {
+								window.wsergoScanCityExplorers(sec);
+							}
 						} else if (status) {
 							status.textContent = '<?php echo esc_js( __( 'Нет данных для исследователя.', 'worldstat-ergonomics' ) ); ?>';
 						}
@@ -1576,53 +1616,18 @@ class WSErgo_Country_Renderer {
 	}
 
 	private static function build_city_explorer_inner_html( string $iso2, string $explorer_uid ): string {
+		unset( $explorer_uid );
 		$cities = class_exists( 'WSCities_CPT' ) && method_exists( 'WSCities_CPT', 'get_cities_for_country' )
 			? WSCities_CPT::get_cities_for_country( $iso2 )
 			: array();
 		if ( empty( $cities ) ) {
 			return '';
 		}
-		$max_explorer = (int) apply_filters( 'wsergo_city_leaf_explorer_max_cities', 600 );
-		$cities_expl  = $cities;
-		usort(
-			$cities_expl,
-			static function ( $a, $b ) {
-				return strcasecmp( (string) ( $a['name'] ?? '' ), (string) ( $b['name'] ?? '' ) );
-			}
-		);
-		if ( count( $cities_expl ) > $max_explorer ) {
-			$cities_expl = array_slice( $cities_expl, 0, $max_explorer );
-		}
-		$city_payload = array();
-		foreach ( $cities_expl as $c ) {
-			$cid = (int) $c['id'];
-			$city_payload[ (string) $cid ] = WSErgo_Country_Data::get_city_leaf_public_detail( $cid );
-		}
-		$regression = class_exists( 'WSErgo_City_Regression' )
-			? WSErgo_City_Regression::analyze_country_payload( $city_payload )
-			: array( 'usable' => false, 'notice' => __( 'Модуль регрессии недоступен.', 'worldstat-ergonomics' ) );
-		$payload = array(
-			'axisLabels'     => WSErgo_Model::get_dimension_labels(),
-			'dimensionOrder' => WSErgo_Model::DIMENSION_KEYS,
-			'cities'         => $city_payload,
-			'regression'     => $regression,
-		);
-		$json = wp_json_encode( $payload, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP );
-		if ( false === $json ) {
-			$json = '{}';
+		if ( class_exists( 'WSErgo_City_Explorer' ) ) {
+			return WSErgo_City_Explorer::capture_render_block( $iso2, $cities );
 		}
 		ob_start();
-		echo '<script type="application/json" class="wsergo-city-leaf-explorer__json">' . $json . '</script>';
-		echo '<p class="wsergo-city-leaf-explorer__intro">' . esc_html__( 'Выберите город в списке: таблицы показателей и осей, рекомендации по перцентилям внутри блока «Показатели по карте полей», затем регрессия листового E по выборке городов страны.', 'worldstat-ergonomics' ) . '</p>';
-		echo '<div class="wsergo-city-leaf-explorer__controls">';
-		echo '<label for="' . esc_attr( $explorer_uid ) . '-sel" class="wsergo-city-leaf-explorer__label">' . esc_html__( 'Город', 'worldstat-ergonomics' ) . '</label>';
-		echo '<select id="' . esc_attr( $explorer_uid ) . '-sel" class="wsp-select wsergo-city-leaf-explorer__select">';
-		echo '<option value="">' . esc_html__( '— Выберите город —', 'worldstat-ergonomics' ) . '</option>';
-		foreach ( $cities_expl as $c ) {
-			echo '<option value="' . esc_attr( (string) (int) $c['id'] ) . '">' . esc_html( (string) ( $c['name'] ?? '' ) ) . '</option>';
-		}
-		echo '</select></div>';
-		echo '<div class="wsergo-city-leaf-explorer__panel" hidden></div>';
+		self::render_legacy_city_leaf_explorer( $iso2, 'wsergo-ergo-explorer-lazy', $cities, false );
 		return (string) ob_get_clean();
 	}
 }

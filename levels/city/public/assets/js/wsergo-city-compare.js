@@ -10,6 +10,20 @@
 		return d.innerHTML;
 	}
 
+	function decodeHtml( s ) {
+		var str = s == null ? '' : String( s );
+		if ( str.indexOf( '&' ) < 0 ) {
+			return str;
+		}
+		var t = document.createElement( 'textarea' );
+		t.innerHTML = str;
+		return t.value;
+	}
+
+	function displayName( s ) {
+		return esc( decodeHtml( s ) );
+	}
+
 	function num( v ) {
 		if ( v == null || v === '' ) {
 			return null;
@@ -35,10 +49,10 @@
 	}
 
 	function cityColHeader( c ) {
-		var h = '<span class="wsergo-cmp-table__city-name">' + esc( c.name || '' ) + '</span>';
+		var h = '<span class="wsergo-cmp-table__city-name">' + displayName( c.name || '' ) + '</span>';
 		if ( c.country_name ) {
 			h +=
-				'<br><span class="wsergo-cmp-table__city-country">' + esc( c.country_name ) + '</span>';
+				'<br><span class="wsergo-cmp-table__city-country">' + displayName( c.country_name ) + '</span>';
 		}
 		return h;
 	}
@@ -52,11 +66,11 @@
 			'</span>' +
 			'<div class="wsergo-cmp-summary__titles">' +
 			'<span class="wsergo-cmp-summary__city">' +
-			esc( c.name || '' ) +
+			displayName( c.name || '' ) +
 			'</span>';
 		if ( c.country_name ) {
 			h +=
-				'<span class="wsergo-cmp-summary__country">' + esc( c.country_name ) + '</span>';
+				'<span class="wsergo-cmp-summary__country">' + displayName( c.country_name ) + '</span>';
 		}
 		h += '</div></div>';
 		return h;

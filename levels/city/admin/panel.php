@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * Панель настроек «Эргономичность города».
  * Подключается из core/class-ergo-admin.php (переменные из render_settings_page).

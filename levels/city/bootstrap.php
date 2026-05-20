@@ -10,6 +10,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 add_action( 'wp_enqueue_scripts', [ 'WSErgo_City_Renderer', 'enqueue_public_assets' ], 20 );
+add_action( 'wp_enqueue_scripts', [ 'WSErgo_City_Explorer', 'enqueue_explorer_assets' ], 21 );
 
 add_action( 'wp_ajax_wsergo_city_explorer_payload', [ 'WSErgo_City_Explorer', 'ajax_explorer_payload' ] );
 add_action( 'wp_ajax_nopriv_wsergo_city_explorer_payload', [ 'WSErgo_City_Explorer', 'ajax_explorer_payload' ] );
