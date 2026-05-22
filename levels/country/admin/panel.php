@@ -16,8 +16,9 @@ if ( ! isset( $data_label_keys ) || ! is_array( $data_label_keys ) ) {
 if ( ! isset( $wsergo_cm_ops ) || ! is_array( $wsergo_cm_ops ) ) {
 	$wsergo_cm_ops = [];
 }
+$wsergo_scope_style = ! empty( $wsergo_scope_hidden ) ? ' style="display:none"' : '';
 ?>
-			<div id="wsergo-panel-country" class="wsergo-scope-panel">
+			<div id="wsergo-panel-country" class="wsergo-scope-panel"<?php echo $wsergo_scope_style; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>>
 				<form class="wsergo-settings-form" method="post" action="options.php">
 					<?php settings_fields( 'wsergo_settings' ); ?>
 				<div id="wsergo-cm-store" class="wsergo-cm-store" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;" aria-hidden="true">

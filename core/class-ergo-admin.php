@@ -877,9 +877,14 @@ class WSErgo_Admin {
 		if ( ! $load ) {
 			return;
 		}
-		if ( ! $is_settings_page ) {
-			wp_enqueue_style( 'wsergo-admin', WSERGO_URL . 'core/public/assets/css/admin.css', [], WSERGO_VERSION );
+		if ( $is_settings_page ) {
+			$this->enqueue_settings_page_assets();
+			// Скрипт вкладок встроен в страницу (render_settings_tabs_script); не подключаем лишнее с платформы.
+			wp_dequeue_script( 'worldstat-admin' );
+			wp_dequeue_style( 'worldstat-admin' );
+			return;
 		}
+		wp_enqueue_style( 'wsergo-admin', WSERGO_URL . 'core/public/assets/css/admin.css', [], WSERGO_VERSION );
 	}
 
 	public function add_meta_boxes(): void {
@@ -893,7 +898,7 @@ class WSErgo_Admin {
 		);
 		add_meta_box(
 			'wsergo_building_data',
-			__( 'Эргономика квартала', 'worldstat-ergonomics' ),
+			__( 'Эргономика здания', 'worldstat-ergonomics' ),
 			[ $this, 'render_building_metabox' ],
 			WSErgo_CPT::SLUG_BUILDING,
 			'normal',
@@ -901,7 +906,7 @@ class WSErgo_Admin {
 		);
 		add_meta_box(
 			'wsergo_room_data',
-			__( 'Эргономика квартала', 'worldstat-ergonomics' ),
+			__( 'Эргономика помещения', 'worldstat-ergonomics' ),
 			[ $this, 'render_room_metabox' ],
 			WSErgo_CPT::SLUG_ROOM,
 			'normal',
@@ -909,7 +914,7 @@ class WSErgo_Admin {
 		);
 		add_meta_box(
 			'wsergo_yard_data',
-			__( 'Эргономика квартала', 'worldstat-ergonomics' ),
+			__( 'Эргономика придомовой', 'worldstat-ergonomics' ),
 			[ $this, 'render_yard_metabox' ],
 			WSErgo_CPT::SLUG_YARD,
 			'normal',
@@ -983,15 +988,15 @@ class WSErgo_Admin {
 			<input type="text" name="wsergo_lat" value="<?php echo esc_attr( (string) get_post_meta( $post->ID, WSErgo_CPT::META_LAT, true ) ); ?>" class="widefat" />
 		</p>
 		<p class="wsergo-row">
-			<label><?php esc_html_e( 'Широта', 'worldstat-ergonomics' ); ?></label>
+			<label><?php esc_html_e( 'Долгота', 'worldstat-ergonomics' ); ?></label>
 			<input type="text" name="wsergo_lng" value="<?php echo esc_attr( (string) get_post_meta( $post->ID, WSErgo_CPT::META_LNG, true ) ); ?>" class="widefat" />
 		</p>
 		<p class="wsergo-row">
-			<label><?php esc_html_e( 'Широта', 'worldstat-ergonomics' ); ?></label>
+			<label><?php esc_html_e( 'Адрес', 'worldstat-ergonomics' ); ?></label>
 			<input type="text" name="wsergo_address" value="<?php echo esc_attr( (string) get_post_meta( $post->ID, WSErgo_CPT::META_ADDRESS, true ) ); ?>" class="widefat" />
 		</p>
 		<p class="wsergo-row">
-			<label><?php esc_html_e( 'Широта', 'worldstat-ergonomics' ); ?></label>
+			<label><?php esc_html_e( 'Год постройки', 'worldstat-ergonomics' ); ?></label>
 			<input type="number" name="wsergo_year" value="<?php echo esc_attr( (string) get_post_meta( $post->ID, WSErgo_CPT::META_YEAR, true ) ); ?>" class="small-text" min="0" />
 		</p>
 		<?php
@@ -1192,7 +1197,7 @@ class WSErgo_Admin {
 		wp_enqueue_script(
 			'wsergo-admin-settings',
 			WSERGO_URL . 'core/public/assets/js/admin-settings.js',
-			[],
+			[ 'jquery' ],
 			$js_ver,
 			true
 		);
@@ -1208,13 +1213,38 @@ class WSErgo_Admin {
 		if ( class_exists( 'WSErgo_Country_Admin' ) ) {
 			WSErgo_Country_Admin::enqueue_settings_assets( 'worldstat_page_wsergo-settings' );
 		}
+		if ( class_exists( 'WSErgo_Level_Registry' ) ) {
+			$js_rel = 'public/assets/js/district-tab-admin.js';
+			$js_path = WSErgo_Level_Registry::path( 'territory', $js_rel );
+			if ( is_readable( $js_path ) ) {
+				wp_enqueue_script(
+					'wsergo-district-tab-admin',
+					WSErgo_Level_Registry::url( 'territory', $js_rel ),
+					[ 'jquery', 'chart-js' ],
+					WSErgo_Level_Registry::asset_version( 'territory', $js_rel ),
+					true
+				);
+				wp_localize_script(
+					'wsergo-district-tab-admin',
+					'wsergoDistrictTab',
+					[
+						'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+						'nonce'   => wp_create_nonce( 'wsergo_settings_ajax' ),
+						'i18n'    => [
+							'saved'          => __( 'Веса сохранены.', 'worldstat-ergonomics' ),
+							'confirmRetrain' => __( 'Пересчитать метрики для всех записей wsp_district? На больших сайтах это может занять время.', 'worldstat-ergonomics' ),
+							'running'        => __( 'Выполняется пересчёт…', 'worldstat-ergonomics' ),
+						],
+					]
+				);
+			}
+		}
 	}
 
 	public function render_settings_page(): void {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
-		$this->enqueue_settings_page_assets();
 		$weights      = get_option( 'wsergo_dimension_weights', WSErgo_Model::get_default_weights() );
 		if ( ! is_array( $weights ) ) {
 			$weights = WSErgo_Model::get_default_weights();
@@ -1339,6 +1369,7 @@ class WSErgo_Admin {
 			<?php
 			if ( class_exists( 'WSErgo_Admin_Shell' ) ) {
 				WSErgo_Admin_Shell::render_scope_nav();
+				WSErgo_Admin_Shell::render_settings_tabs_script();
 				WSErgo_Admin_Shell::render_level_panels( $wsergo_panel_vars );
 			} else {
 				?>

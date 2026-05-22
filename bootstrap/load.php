@@ -19,6 +19,7 @@ $core_files = [
 	'class-ergo-calculator.php',
 	'class-ergo-level-registry.php',
 	'class-ergo-admin-shell.php',
+	'class-ergo-extension-notices.php',
 ];
 
 foreach ( $core_files as $file ) {

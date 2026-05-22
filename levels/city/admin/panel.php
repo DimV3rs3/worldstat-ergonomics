@@ -9,8 +9,9 @@
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
+$wsergo_scope_style = ! empty( $wsergo_scope_hidden ) ? ' style="display:none"' : '';
 ?>
-			<div id="wsergo-panel-city" class="wsergo-scope-panel">
+			<div id="wsergo-panel-city" class="wsergo-scope-panel"<?php echo $wsergo_scope_style; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>>
 				<div class="notice notice-info inline" style="margin:12px 0;padding:12px;">
 					<p style="margin:.4em 0;"><strong><?php esc_html_e( 'Эргономичность города', 'worldstat-ergonomics' ); ?></strong></p>
 					<p style="margin:.4em 0;"><?php esc_html_e( 'Отдельные вкладки для городского уровня: измерения, данные и формула.', 'worldstat-ergonomics' ); ?></p>

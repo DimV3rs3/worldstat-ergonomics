@@ -63,29 +63,10 @@ class WSErgo_CPT {
 	}
 
 	public function register_post_types(): void {
-		register_post_type(
-			self::SLUG_DISTRICT,
-			[
-				'labels'             => [
-					'name'          => __( 'Кварталы (эргономика)', 'worldstat-ergonomics' ),
-					'singular_name' => __( 'Квартал', 'worldstat-ergonomics' ),
-					'add_new_item'  => __( 'Добавить квартал', 'worldstat-ergonomics' ),
-					'edit_item'     => __( 'Редактировать квартал', 'worldstat-ergonomics' ),
-					'all_items'     => __( 'Кварталы', 'worldstat-ergonomics' ),
-				],
-				'public'             => true,
-				'show_ui'            => true,
-				'show_in_menu'       => false,
-				'menu_icon'          => 'dashicons-location-alt',
-				'menu_position'      => 26,
-				'show_in_rest'       => true,
-				'rest_base'          => 'districts',
-				'rewrite'            => [ 'slug' => 'district', 'with_front' => false ],
-				'has_archive'        => false,
-				'supports'           => [ 'title', 'editor', 'thumbnail' ],
-				'capability_type'    => 'post',
-			]
-		);
+		// CPT wsp_district регистрирует worldstat-districts (данные wsdistrict_*).
+		if ( ! class_exists( 'WSDistricts_CPT' ) ) {
+			$this->register_district_post_type();
+		}
 
 		register_post_type(
 			self::SLUG_BUILDING,
@@ -147,6 +128,35 @@ class WSErgo_CPT {
 				'show_in_rest'       => true,
 				'rest_base'          => 'yards',
 				'rewrite'            => [ 'slug' => 'adjacent-yard', 'with_front' => false ],
+				'has_archive'        => false,
+				'supports'           => [ 'title', 'editor', 'thumbnail' ],
+				'capability_type'    => 'post',
+			]
+		);
+	}
+
+	/**
+	 * CPT квартала, если плагин Districts не установлен.
+	 */
+	private function register_district_post_type(): void {
+		register_post_type(
+			self::SLUG_DISTRICT,
+			[
+				'labels'             => [
+					'name'          => __( 'Кварталы (эргономика)', 'worldstat-ergonomics' ),
+					'singular_name' => __( 'Квартал', 'worldstat-ergonomics' ),
+					'add_new_item'  => __( 'Добавить квартал', 'worldstat-ergonomics' ),
+					'edit_item'     => __( 'Редактировать квартал', 'worldstat-ergonomics' ),
+					'all_items'     => __( 'Кварталы', 'worldstat-ergonomics' ),
+				],
+				'public'             => true,
+				'show_ui'            => true,
+				'show_in_menu'       => false,
+				'menu_icon'          => 'dashicons-location-alt',
+				'menu_position'      => 26,
+				'show_in_rest'       => true,
+				'rest_base'          => 'districts',
+				'rewrite'            => [ 'slug' => 'district', 'with_front' => false ],
 				'has_archive'        => false,
 				'supports'           => [ 'title', 'editor', 'thumbnail' ],
 				'capability_type'    => 'post',

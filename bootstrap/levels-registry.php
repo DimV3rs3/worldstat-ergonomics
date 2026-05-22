@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * @return string[]
  */
 function wsergo_registered_level_ids(): array {
-	$levels = [ 'country', 'city' ];
+	$levels = [ 'country', 'city', 'territory', 'building', 'zone' ];
 	/**
 	 * @param string[] $levels
 	 */

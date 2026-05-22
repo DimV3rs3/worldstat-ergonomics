@@ -116,7 +116,8 @@ new WSErgo_Admin();
 add_filter(
 	'worldstat_single_template',
 	static function ( string $template, string $post_type ): string {
-		if ( WSErgo_CPT::SLUG_DISTRICT === $post_type ) {
+		// Шаблон с ML-анализом — в worldstat-districts; эргономика подключается через хуки.
+		if ( WSErgo_CPT::SLUG_DISTRICT === $post_type && ! class_exists( 'WSDistricts_CPT' ) ) {
 			$path = WSERGO_DIR . 'levels/territory/templates/single-wsp_district.php';
 			return file_exists( $path ) ? $path : $template;
 		}
@@ -149,6 +150,9 @@ register_activation_hook(
 		}
 		if ( class_exists( 'WSErgo_City_Defaults' ) ) {
 			WSErgo_City_Defaults::on_plugin_activation();
+		}
+		if ( class_exists( 'WSErgo_District_Bridge' ) ) {
+			WSErgo_District_Bridge::ensure_default_options();
 		}
 	}
 );

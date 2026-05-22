@@ -3,12 +3,11 @@
 	max-width: 28rem;
 }
 
-/* Панели уровней (страна / город / территория) */
+/* Панели уровней: видимость переключает inline-скрипт (display !important) */
 .wsergo-scope-panel {
-	display: none;
 	margin-top: 8px;
 }
 
-.wsergo-scope-panel.wsergo-scope-panel--active {
-	display: block !important;
+.wrap .wsergo-scope-panel[hidden] {
+	display: none !important;
 }
