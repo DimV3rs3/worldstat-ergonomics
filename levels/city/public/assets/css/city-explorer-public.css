@@ -53,6 +53,16 @@
 	display: block;
 }
 
+/* Скрыть навигацию подвкладок, если осталась только «Страна» (country+city). */
+.wsergo-ergo-country-macro-scope--country-only .wsergo-wsp-tab-nav {
+	display: none;
+	margin-bottom: 0;
+}
+
+.wsergo-city-ergo-scope--cities-only .wsergo-wsp-tab-nav {
+	margin-bottom: 16px;
+}
+
 /* Блок «Анализ города» на вкладке «Города» (эргономичность страны) */
 
 .wsergo-reg-glossary__title {

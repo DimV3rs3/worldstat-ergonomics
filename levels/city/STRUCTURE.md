@@ -56,6 +56,6 @@ worldstat-cities (wscity_*)
 
 ## Интеграция с уровнем country
 
-`WSErgo_City_Country_Integration` перехватывает `WSErgo_Renderer::render_country_tab()` и подменяет legacy `wsergo-city-leaf-explorer` на `WSErgo_City_Explorer::capture_render_block()`. AJAX `wsergo_load_country_city_explorer` обслуживается city-уровнем. Если на странице нет макро-блока country (`macro_datasets`), показываются собственные подвкладки «Страна» / «Город» (`.wsergo-city-ergo-scope`). Assets — только из `levels/city/public/assets/`.
+`WSErgo_City_Country_Integration` перехватывает `WSErgo_Renderer::render_country_tab()`. Если активны **country + city** — «Анализ города» встраивается на вкладку «Страна», подвкладка «Город» (макро) скрывается. Если **только city** — показывается вкладка «Города» с тем же блоком и таблицей городов.
 
 Ядро расчёта: `core/class-ergo-calculator.php`, `core/class-ergo-expression.php`.

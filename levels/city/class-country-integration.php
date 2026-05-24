@@ -24,17 +24,32 @@ class WSErgo_City_Country_Integration {
 	 * Точка входа вкладки «Эргономичность» страны (вместо прямого вызова country renderer).
 	 */
 	public static function render_country_tab( string $country_code ): void {
-		$iso2 = strtoupper( sanitize_text_field( $country_code ) );
+		$iso2           = strtoupper( sanitize_text_field( $country_code ) );
+		$country_active = self::is_level_active( 'country' );
+		$city_active    = self::is_level_active( 'city' );
 
-		if ( self::country_has_macro_dual_scope() ) {
-			ob_start();
-			WSErgo_Country_Renderer::render_country_tab( $country_code );
-			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- HTML страны с подменой city-explorer.
-			echo self::inject_city_explorer_into_html( (string) ob_get_clean(), $iso2 );
+		if ( ! $country_active && $city_active ) {
+			self::render_cities_only_tab( $iso2 );
 			return;
 		}
 
-		self::render_standalone_country_city_tabs( $iso2, $country_code );
+		if ( ! $country_active || ! class_exists( 'WSErgo_Country_Renderer' ) ) {
+			echo '<p class="wsp-muted">' . esc_html__( 'Модуль эргономичности недоступен.', 'worldstat-ergonomics' ) . '</p>';
+			return;
+		}
+
+		if ( $city_active ) {
+			ob_start();
+			WSErgo_Country_Renderer::render_country_tab( $country_code );
+			$html = (string) ob_get_clean();
+			$html = self::inject_city_explorer_into_html( $html, $iso2 );
+			$html = self::strip_city_macro_subtab( $html );
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			echo $html;
+			return;
+		}
+
+		WSErgo_Country_Renderer::render_country_tab( $country_code );
 	}
 
 
@@ -77,17 +92,23 @@ class WSErgo_City_Country_Integration {
 
 
 	/**
-	 * Fallback: собственные подвкладки «Страна / Город», если макро-блок country отсутствует.
+	 * Уровень country|city загружен через WSErgo_Level_Registry.
 	 */
-	private static function render_standalone_country_city_tabs( string $iso2, string $country_code ): void {
-		ob_start();
-		WSErgo_Country_Renderer::render_country_tab( $country_code );
-		$country_html = self::strip_explorer_sections( (string) ob_get_clean() );
+	public static function is_level_active( string $level_id ): bool {
+		if ( ! class_exists( 'WSErgo_Level_Registry' ) ) {
+			return false;
+		}
+		return null !== WSErgo_Level_Registry::get_manifest( sanitize_key( $level_id ) );
+	}
 
+
+	/**
+	 * Только city-уровень: вкладка «Города» с тем же блоком, что встраивается в country.
+	 */
+	private static function render_cities_only_tab( string $iso2 ): void {
 		$cities = self::get_cities_for_country( $iso2 );
 		if ( ! class_exists( 'WSErgo_City_Explorer' ) || empty( $cities ) ) {
-			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-			echo $country_html;
+			echo '<p class="wsp-muted">' . esc_html__( 'Нет городов в базе для этой страны.', 'worldstat-ergonomics' ) . '</p>';
 			return;
 		}
 
@@ -95,55 +116,131 @@ class WSErgo_City_Country_Integration {
 
 		$tab_root = 'wsergo-city-ergo-scope-' . ( function_exists( 'wp_unique_id' ) ? wp_unique_id() : uniqid( '', true ) );
 		?>
-		<div class="wsergo-city-ergo-scope" id="<?php echo esc_attr( $tab_root ); ?>">
-			<div class="wsergo-wsp-tab-nav" role="tablist" aria-label="<?php esc_attr_e( 'Эргономичность: страна и город', 'worldstat-ergonomics' ); ?>">
-				<button type="button" class="wsergo-wsp-tab-btn is-active" role="tab" aria-selected="true" data-wsergo-city-ergo-scope="country"><?php esc_html_e( 'Страна', 'worldstat-ergonomics' ); ?></button>
-				<button type="button" class="wsergo-wsp-tab-btn" role="tab" aria-selected="false" data-wsergo-city-ergo-scope="city"><?php esc_html_e( 'Город', 'worldstat-ergonomics' ); ?></button>
+		<div class="wsergo-city-ergo-scope wsergo-city-ergo-scope--cities-only" id="<?php echo esc_attr( $tab_root ); ?>">
+			<div class="wsergo-wsp-tab-nav" role="tablist" aria-label="<?php esc_attr_e( 'Эргономичность городов', 'worldstat-ergonomics' ); ?>">
+				<button type="button" class="wsergo-wsp-tab-btn is-active" role="tab" aria-selected="true" data-wsergo-city-ergo-scope="cities"><?php esc_html_e( 'Города', 'worldstat-ergonomics' ); ?></button>
 			</div>
-			<div class="wsergo-wsp-tab-panel is-active wsergo-city-ergo-pane" data-wsergo-city-ergo-pane="country">
-				<?php
-				// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- HTML country renderer без legacy explorer.
-				echo $country_html;
-				?>
-			</div>
-			<div class="wsergo-wsp-tab-panel wsergo-city-ergo-pane" data-wsergo-city-ergo-pane="city">
+			<div class="wsergo-wsp-tab-panel is-active wsergo-city-ergo-pane" data-wsergo-city-ergo-pane="cities">
 				<?php
 				// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 				echo WSErgo_City_Explorer::capture_render_block( $iso2, $cities );
+				self::render_cities_summary_table( $iso2, $cities );
 				?>
 			</div>
 		</div>
 		<script>
 		(function(){
-			var root = document.getElementById(<?php echo wp_json_encode( $tab_root ); ?>);
-			if (!root) return;
-			var key = 'wsergo_city_ergo_tab_scope';
-			function applyScope(mode) {
-				root.querySelectorAll('[data-wsergo-city-ergo-scope]').forEach(function(btn){
-					var on = btn.getAttribute('data-wsergo-city-ergo-scope') === mode;
-					btn.classList.toggle('is-active', on);
-					btn.setAttribute('aria-selected', on ? 'true' : 'false');
-				});
-				root.querySelectorAll('.wsergo-city-ergo-pane').forEach(function(pane){
-					var on = pane.getAttribute('data-wsergo-city-ergo-pane') === mode;
-					pane.classList.toggle('is-active', on);
-				});
-				try { localStorage.setItem(key, mode); } catch (e) {}
-				if (mode === 'city' && window.wsergoScanCityExplorers) {
-					window.wsergoScanCityExplorers(root);
-				}
+			if (window.wsergoScanCityExplorers) {
+				var root = document.getElementById(<?php echo wp_json_encode( $tab_root ); ?>);
+				if (root) window.wsergoScanCityExplorers(root);
 			}
-			root.querySelectorAll('[data-wsergo-city-ergo-scope]').forEach(function(btn){
-				btn.addEventListener('click', function(){
-					applyScope(btn.getAttribute('data-wsergo-city-ergo-scope'));
-				});
-			});
-			var saved = '';
-			try { saved = localStorage.getItem(key) || ''; } catch (e) {}
-			if (saved === 'city') applyScope('city');
 		})();
 		</script>
 		<?php
+	}
+
+
+	/**
+	 * Таблица городов (когда country-уровень не подключён).
+	 *
+	 * @param string              $iso2
+	 * @param array<int, array>   $cities
+	 */
+	private static function render_cities_summary_table( string $iso2, array $cities ): void {
+		unset( $iso2 );
+		if ( ! class_exists( 'WorldStat_UI' ) || empty( $cities ) ) {
+			return;
+		}
+
+		$rows         = [];
+		$any_quarters = false;
+		foreach ( $cities as $c ) {
+			$cid = (int) ( $c['id'] ?? 0 );
+			if ( $cid <= 0 ) {
+				continue;
+			}
+			$city_idx = class_exists( 'WSErgo_City_Data' ) ? WSErgo_City_Data::get_city_ergo_index( $cid ) : null;
+			$dcount   = class_exists( 'WSErgo_CPT' ) ? count( WSErgo_CPT::get_districts_for_city( $cid ) ) : 0;
+			if ( $dcount > 0 ) {
+				$any_quarters = true;
+			}
+			$link = get_permalink( $cid );
+			$name = '<a href="' . esc_url( $link ) . '">' . esc_html( (string) ( $c['name'] ?? get_the_title( $cid ) ) ) . '</a>';
+			$rows[] = [
+				'name'  => $name,
+				'e_idx' => $city_idx !== null && $city_idx > 0 ? (string) $city_idx : '—',
+				'dc'    => (string) $dcount,
+			];
+		}
+
+		if ( empty( $rows ) ) {
+			return;
+		}
+
+		$table_rows = [];
+		foreach ( $rows as $r ) {
+			if ( $any_quarters ) {
+				$table_rows[] = [ $r['name'], $r['e_idx'], $r['dc'] ];
+			} else {
+				$table_rows[] = [ $r['name'], $r['e_idx'] ];
+			}
+		}
+
+		$headers = [
+			__( 'Город', 'worldstat-ergonomics' ),
+			__( 'Индекс E', 'worldstat-ergonomics' ),
+		];
+		if ( $any_quarters ) {
+			$headers[] = __( 'Кварталов', 'worldstat-ergonomics' );
+		}
+
+		WorldStat_UI::table(
+			[
+				'headers'    => $headers,
+				'rows'       => $table_rows,
+				'sortable'   => true,
+				'searchable' => true,
+				'allow_html' => true,
+			]
+		);
+	}
+
+
+	/**
+	 * Убрать подвкладку «Город» (макро city) из HTML country, если city уже встроен в «Страна».
+	 */
+	private static function strip_city_macro_subtab( string $html ): string {
+		$html = (string) preg_replace(
+			'/<button\b[^>]*\bdata-wsergo-ergo-country-scope="city"[^>]*>.*?<\/button>\s*/is',
+			'',
+			$html,
+			1
+		);
+
+		$html = (string) preg_replace(
+			'/<div class="wsergo-wsp-tab-panel wsergo-ergo-country-pane" data-wsergo-ergo-country-pane="city"[^>]*>\s*<div class="wsergo-city-macro-lazy"[\s\S]*?<\/p>\s*<\/div>\s*/',
+			'',
+			$html,
+			1
+		);
+
+		if ( str_contains( $html, 'wsergo-ergo-country-macro-scope' ) ) {
+			$html = (string) preg_replace(
+				'/(<div class="wsergo-ergo-country-macro-scope)(?![^"]*wsergo-ergo-country-macro-scope--country-only)/',
+				'$1 wsergo-ergo-country-macro-scope--country-only',
+				$html,
+				1
+			);
+		}
+
+		// Сброс сохранённой подвкладки «city» в inline-скрипте country.
+		$html = (string) preg_replace(
+			"/if \(saved === 'city'\) applyScope\('city'\);/",
+			"if (saved === 'city') applyScope('country');",
+			$html
+		);
+
+		return $html;
 	}
 
 
@@ -164,13 +261,11 @@ class WSErgo_City_Country_Integration {
 
 		$explorer_html = WSErgo_City_Explorer::capture_render_block( $iso2, $cities );
 
-		// Немедленный legacy-блок.
 		$pattern_full = '/<section class="wsp-section wsergo-city-leaf-explorer(?! wsergo-city-leaf-explorer--lazy)[^"]*"[^>]*>.*?<\/section>/s';
 		if ( preg_match( $pattern_full, $html ) ) {
 			return (string) preg_replace( $pattern_full, $explorer_html, $html, 1 );
 		}
 
-		// Lazy placeholder (совместим с JS country: wsergo-city-leaf-explorer__lazy-status).
 		$lazy_msg = esc_html__( 'Блок «Анализ города» загрузится при прокрутке…', 'worldstat-ergonomics' );
 		$pattern_lazy = '/<section class="wsp-section wsergo-city-leaf-explorer wsergo-city-leaf-explorer--lazy"[^>]*>.*?<\/section>/s';
 		if ( preg_match( $pattern_lazy, $html, $m ) ) {
@@ -182,9 +277,6 @@ class WSErgo_City_Country_Integration {
 	}
 
 
-	/**
-	 * Сохраняет id/data-iso2 lazy-секции, меняет только текст статуса.
-	 */
 	private static function build_lazy_explorer_placeholder( string $original_section, string $status_text ): string {
 		$id   = '';
 		$iso2 = '';
@@ -204,18 +296,6 @@ class WSErgo_City_Country_Integration {
 		}
 
 		return '<section' . $attrs . '><p class="wsp-muted wsergo-city-leaf-explorer__lazy-status">' . $status_text . '</p></section>';
-	}
-
-
-	private static function strip_explorer_sections( string $html ): string {
-		$patterns = [
-			'/<section class="wsp-section wsergo-city-leaf-explorer[^"]*"[^>]*>.*?<\/section>/s',
-			'/<section class="wsp-section wsergo-city-explorer-lazy"[^>]*>.*?<\/section>/s',
-		];
-		foreach ( $patterns as $pattern ) {
-			$html = (string) preg_replace( $pattern, '', $html );
-		}
-		return $html;
 	}
 
 
