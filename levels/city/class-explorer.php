@@ -89,16 +89,9 @@ class WSErgo_City_Explorer {
 		}
 
 		wp_enqueue_style(
-			'wsergo-ergo-country-public',
-			WSErgo_Level_Registry::url( 'country', 'public/assets/ergo-country-public.css' ),
-			$deps_css,
-			WSErgo_Level_Registry::asset_version( 'country', 'public/assets/ergo-country-public.css' )
-		);
-
-		wp_enqueue_style(
 			'wsergo-city-explorer-public',
 			WSErgo_Level_Registry::url( 'city', 'public/assets/css/city-explorer-public.css' ),
-			array_merge( $deps_css, [ 'wsergo-ergo-country-public' ] ),
+			$deps_css,
 			WSErgo_Level_Registry::asset_version( 'city', 'public/assets/css/city-explorer-public.css' )
 		);
 

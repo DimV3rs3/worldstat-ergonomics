@@ -655,4 +655,30 @@
 			scanExplorers();
 		}
 	} );
+
+	/** После lazy-load country tab подхватываем новый HTML исследователя. */
+	function watchLazyExplorerSections() {
+		if ( ! ( 'MutationObserver' in window ) ) {
+			return;
+		}
+		document.querySelectorAll( '[data-wsergo-explorer-lazy="1"]' ).forEach( function ( sec ) {
+			if ( sec.getAttribute( 'data-wsergo-lazy-watched' ) === '1' ) {
+				return;
+			}
+			sec.setAttribute( 'data-wsergo-lazy-watched', '1' );
+			var obs = new MutationObserver( function () {
+				if ( window.wsergoScanCityExplorers ) {
+					window.wsergoScanCityExplorers( sec );
+				}
+			} );
+			obs.observe( sec, { childList: true, subtree: true } );
+		} );
+	}
+
+	if ( document.readyState === 'loading' ) {
+		document.addEventListener( 'DOMContentLoaded', watchLazyExplorerSections );
+	} else {
+		watchLazyExplorerSections();
+	}
+	$( document ).on( 'wsp:tab:loaded', watchLazyExplorerSections );
 } )( window, window.jQuery );

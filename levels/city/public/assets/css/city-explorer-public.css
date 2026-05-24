@@ -4,6 +4,55 @@
  * @package WorldStatErgonomics
  */
 
+/* Fallback-подвкладки «Страна / Город», если макро-блок country отсутствует */
+.wsergo-city-ergo-scope {
+	margin-bottom: 12px;
+}
+
+.wsergo-city-ergo-scope .wsergo-wsp-tab-nav {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	border-bottom: 2px solid var(--wsp-gray-200, #e5e7eb);
+	margin-bottom: 20px;
+	overflow: visible;
+}
+
+.wsergo-city-ergo-scope .wsergo-wsp-tab-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 10px 16px;
+	border: none;
+	background: transparent;
+	font-size: 14px;
+	font-weight: 500;
+	color: var(--wsp-gray-500, #6b7280);
+	cursor: pointer;
+	border-bottom: 2px solid transparent;
+	margin-bottom: -2px;
+	white-space: nowrap;
+	transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.wsergo-city-ergo-scope .wsergo-wsp-tab-btn:hover {
+	color: var(--wsp-gray-700, #374151);
+}
+
+.wsergo-city-ergo-scope .wsergo-wsp-tab-btn.is-active {
+	color: var(--wsp-primary, #2563eb);
+	border-bottom-color: var(--wsp-primary, #2563eb);
+	font-weight: 600;
+}
+
+.wsergo-city-ergo-scope .wsergo-city-ergo-pane {
+	display: none;
+}
+
+.wsergo-city-ergo-scope .wsergo-city-ergo-pane.is-active {
+	display: block;
+}
+
 /* Блок «Анализ города» на вкладке «Города» (эргономичность страны) */
 
 .wsergo-reg-glossary__title {

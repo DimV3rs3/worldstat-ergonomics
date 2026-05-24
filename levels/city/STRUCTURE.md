@@ -12,6 +12,7 @@ levels/city/
 ├── class-data.php            # Индекс E города, субиндексы, данные для сравнения/карты
 ├── class-regression.php      # Регрессия и рекомендации по стране
 ├── class-explorer.php        # Блок «Анализ города», AJAX сравнение и explorer
+├── class-country-integration.php  # Вкладка страны: подмена explorer, fallback «Страна/Город»
 ├── class-renderer.php        # Вывод на странице города/страны, подключение assets
 │
 ├── admin/
@@ -37,6 +38,7 @@ levels/city/
 | `class-data.php` | E города (кварталы или лист), выборки для UI и платформы |
 | `class-regression.php` | OLS по городам страны, текст рекомендаций |
 | `class-explorer.php` | Блок «Анализ города», AJAX, `capture_render_block()` для вкладки страны |
+| `class-country-integration.php` | Встраивание explorer на вкладку страны и fallback «Страна/Город» без правок levels/country/ |
 | `class-renderer.php` | Карточка E, секция эргономики, шорткод `[wsergo_city_e]` |
 | `class-settings.php` | Чтение/сохранение городских опций в `wp_options` |
 | `class-defaults.php` | Стартовые сопоставления полей и сид настроек |
@@ -54,6 +56,6 @@ worldstat-cities (wscity_*)
 
 ## Интеграция с уровнем country
 
-На вкладке **Эргономичность** страны (`WSErgo_Country_Renderer::render_country_ergo_regions_and_cities_tables`) выводится `WSErgo_City_Explorer::capture_render_block()`. Скрипты подключаются через `enqueue_explorer_assets()` (в т.ч. при lazy-load). Инициализация после AJAX — `wsergoScanCityExplorers()` в `wsergo-city-explorer-boot.js` (событие `wsp:tab:loaded` платформы).
+`WSErgo_City_Country_Integration` перехватывает `WSErgo_Renderer::render_country_tab()` и подменяет legacy `wsergo-city-leaf-explorer` на `WSErgo_City_Explorer::capture_render_block()`. AJAX `wsergo_load_country_city_explorer` обслуживается city-уровнем. Если на странице нет макро-блока country (`macro_datasets`), показываются собственные подвкладки «Страна» / «Город» (`.wsergo-city-ergo-scope`). Assets — только из `levels/city/public/assets/`.
 
 Ядро расчёта: `core/class-ergo-calculator.php`, `core/class-ergo-expression.php`.

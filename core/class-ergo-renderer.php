@@ -35,6 +35,10 @@ class WSErgo_Renderer {
 	}
 
 	public static function render_country_tab( string $country_code ): void {
+		if ( class_exists( 'WSErgo_City_Country_Integration' ) ) {
+			WSErgo_City_Country_Integration::render_country_tab( $country_code );
+			return;
+		}
 		WSErgo_Country_Renderer::render_country_tab( $country_code );
 	}
 

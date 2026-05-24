@@ -12,6 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 return [
 	'id'       => 'city',
 	'label'    => __( 'Город', 'worldstat-ergonomics' ),
+	'admin_nav' => __( 'Эргономичность города', 'worldstat-ergonomics' ),
 	'prefix'   => 'city',
 	'requires' => [
 		'class-settings.php',
@@ -20,6 +21,7 @@ return [
 		'class-regression.php',
 		'class-data.php',
 		'class-explorer.php',
+		'class-country-integration.php',
 		'class-renderer.php',
 		'ajax.php',
 	],
