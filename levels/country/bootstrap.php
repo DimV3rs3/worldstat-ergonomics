@@ -19,6 +19,7 @@ add_action( 'wp_ajax_nopriv_wsergo_load_country_city_macro', [ 'WSErgo_Country_R
 
 add_action( 'wp_ajax_wsergo_auto_tune_macro_clusters', 'wsergo_country_ajax_auto_tune_macro_clusters' );
 add_action( 'wp_ajax_wsergo_load_cluster_features_ui', 'wsergo_country_ajax_load_cluster_features_ui' );
+add_action( 'wp_ajax_wsergo_cluster_preview', 'wsergo_country_ajax_cluster_preview' );
 
 /**
  * AJAX: автоподбор признаков k-means и числа кластеров.
@@ -125,6 +126,67 @@ function wsergo_country_ajax_load_cluster_features_ui(): void {
 	$html = ob_get_clean();
 	wsergo_country_discard_ajax_output_buffer();
 	wp_send_json_success( [ 'html' => $html ] );
+}
+
+/**
+ * Блок превью кластеризации (карта / график) рядом со списком признаков.
+ *
+ * @param string $scope country|city
+ */
+function wsergo_render_cluster_viz_host( string $scope ): void {
+	$scope = ( 'city' === $scope ) ? 'city' : 'country';
+	?>
+	<div id="wsergo-cluster-viz-<?php echo esc_attr( $scope ); ?>" class="wsergo-cluster-viz-host" data-scope="<?php echo esc_attr( $scope ); ?>">
+		<div class="wsergo-cluster-viz-toolbar">
+			<strong><?php esc_html_e( 'Превью кластеризации', 'worldstat-ergonomics' ); ?></strong>
+			<button type="button" class="button button-small wsergo-cluster-viz-mode is-active" data-mode="map"><?php esc_html_e( 'Карта', 'worldstat-ergonomics' ); ?></button>
+			<button type="button" class="button button-small wsergo-cluster-viz-mode" data-mode="chart"><?php esc_html_e( 'График', 'worldstat-ergonomics' ); ?></button>
+		</div>
+		<div class="wsergo-cluster-viz-map-pane">
+			<div class="wsergo-cluster-viz-map" role="img" aria-label="<?php esc_attr_e( 'Карта кластеров стран', 'worldstat-ergonomics' ); ?>"></div>
+		</div>
+		<div class="wsergo-cluster-viz-chart-pane" style="display:none;">
+			<div class="wsergo-cluster-viz-chart-wrap">
+				<canvas class="wsergo-cluster-viz-chart-doughnut" height="130"></canvas>
+				<canvas class="wsergo-cluster-viz-chart-scatter" height="200"></canvas>
+			</div>
+			<div class="wsergo-cluster-viz-table-wrap"></div>
+		</div>
+		<div class="wsergo-cluster-viz-legend"></div>
+		<p class="wsergo-cluster-viz-status description" style="margin:.5em 0 0;"><?php esc_html_e( 'Отметьте не меньше двух признаков — превью обновится автоматически.', 'worldstat-ergonomics' ); ?></p>
+	</div>
+	<?php
+}
+
+/**
+ * AJAX: превью k-means по текущим чекбоксам и k (без сохранения настроек).
+ */
+function wsergo_country_ajax_cluster_preview(): void {
+	check_ajax_referer( 'wsergo_admin', 'nonce' );
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wsergo_country_discard_ajax_output_buffer();
+		wp_send_json_error( [ 'message' => __( 'Недостаточно прав.', 'worldstat-ergonomics' ) ] );
+	}
+	if ( ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+		wsergo_country_discard_ajax_output_buffer();
+		wp_send_json_error( [ 'message' => __( 'Калькулятор макроданных недоступен.', 'worldstat-ergonomics' ) ] );
+	}
+	$scope = isset( $_POST['scope'] ) && (string) wp_unslash( $_POST['scope'] ) === 'city' ? 'city' : 'country';
+	$features = isset( $_POST['features'] ) && is_array( $_POST['features'] )
+		? array_map( 'sanitize_key', wp_unslash( $_POST['features'] ) )
+		: array();
+	$k = isset( $_POST['k'] ) ? (int) $_POST['k'] : 0;
+	if ( $k < 2 && class_exists( 'WSErgo_Settings' ) ) {
+		$k = ( 'city' === $scope )
+			? WSErgo_Settings::get_city_macro_k_clusters()
+			: WSErgo_Settings::get_macro_k_clusters();
+	}
+	$result = WSErgo_Country_Macro_Calculator::preview_macro_clusters( $scope, $features, $k );
+	wsergo_country_discard_ajax_output_buffer();
+	if ( empty( $result['ok'] ) ) {
+		wp_send_json_error( [ 'message' => (string) ( $result['message'] ?? __( 'Ошибка превью.', 'worldstat-ergonomics' ) ) ] );
+	}
+	wp_send_json_success( $result );
 }
 
 $wsergo_country_macro_flush_options = [

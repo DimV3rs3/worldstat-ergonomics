@@ -208,6 +208,7 @@
 					} else {
 						$status.text((cfg.i18n && cfg.i18n.done) || 'Done');
 					}
+					$(document).trigger('wsergo-cluster-preview-refresh', [scope]);
 				});
 			})
 			.fail(function (xhr) {

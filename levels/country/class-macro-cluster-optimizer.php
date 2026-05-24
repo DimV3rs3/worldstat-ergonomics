@@ -10,13 +10,29 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class WSErgo_Macro_Cluster_Optimizer {
 
-	private const MIN_FEATURES    = 3;
+	/** Минимум признаков после автоподбора (2D + большое k даёт одиночки). */
+	private const MIN_FEATURES    = 4;
 	private const MAX_FEATURES    = 8;
 	/** Минимальная доля стран с числом по признаку (для отбора кандидатов). */
 	private const MIN_COVERAGE    = 0.20;
 	private const MAX_CORR        = 0.85;
 	private const MIN_COUNTRIES   = 3;
 	private const IDEAL_COUNTRIES = 8;
+	/** Перезапуски k-means на финальном шаге автоподбора. */
+	private const KMEANS_RESTARTS_FINAL = 3;
+	/** Перезапуски при переборе признаков / k (быстрая оценка без силуэта). */
+	private const KMEANS_RESTARTS_PROBE = 2;
+	/** Сколько топ-признаков по CV участвуют в переборе. */
+	private const TUNE_TOP_CANDIDATES = 8;
+	/** Доля стран в одном кластере, выше — сильный штраф при автоподборе. */
+	private const MAX_DOMINANT_CLUSTER_SHARE = 0.55;
+	/** Суммарная доля двух крупнейших кластеров, выше — штраф («два мешка»). */
+	private const MAX_TOP2_CLUSTER_SHARE = 0.72;
+	/** Минимальный размер «нормального» кластера (доля от n, не меньше 3 стран). */
+	private const MIN_CLUSTER_SIZE_FRAC = 0.025;
+
+	/** @var array<string, list<list<float>>> Кэш стандартизованных матриц по набору признаков. */
+	private static $scaled_matrix_cache = array();
 
 	/**
 	 * @return array{
@@ -28,6 +44,11 @@ class WSErgo_Macro_Cluster_Optimizer {
 	 * }
 	 */
 	public static function auto_tune( string $scope = 'country' ): array {
+		if ( function_exists( 'set_time_limit' ) ) {
+			@set_time_limit( 90 );
+		}
+		self::clear_tune_cache();
+
 		$scope = ( 'city' === $scope ) ? 'city' : 'country';
 		if ( ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
 			return array(
@@ -91,23 +112,19 @@ class WSErgo_Macro_Cluster_Optimizer {
 			);
 		}
 
-		$selected = self::select_uncorrelated_features( $rows, $scored );
+		$selected = self::select_features_for_separation( $rows, $scored );
+		if ( count( $selected ) < self::MIN_FEATURES ) {
+			$selected = self::select_uncorrelated_features( $rows, $scored );
+		}
+		$selected = self::ensure_min_features( $rows, $scored, $selected );
 		if ( count( $selected ) < 2 ) {
 			$selected = array_slice( array_keys( $scored ), 0, min( self::MAX_FEATURES, count( $scored ) ) );
 		}
 
-		$matrix   = array();
-		$matrix_n = 0;
-		while ( count( $selected ) >= 2 ) {
-			$matrix   = self::build_matrix( $rows, $selected );
-			$matrix_n = count( $matrix );
-			if ( $matrix_n >= self::MIN_COUNTRIES ) {
-				break;
-			}
-			array_pop( $selected );
-		}
+		$matrix   = self::build_matrix_imputed( $rows, $selected );
+		$matrix_n = count( $matrix );
 		if ( $matrix_n < self::MIN_COUNTRIES ) {
-			$matrix   = self::build_matrix_imputed( $rows, $selected );
+			$matrix   = self::build_matrix( $rows, $selected );
 			$matrix_n = count( $matrix );
 		}
 		if ( $matrix_n < self::MIN_COUNTRIES ) {
@@ -118,16 +135,33 @@ class WSErgo_Macro_Cluster_Optimizer {
 		}
 
 		$scaled = self::standard_scale_rows( $matrix );
-		$k      = self::optimal_k_elbow( $scaled );
+		$k      = self::optimal_k_for_separation( $scaled, count( $selected ) );
 		$report = self::build_feature_report( $scored, $selected );
+
+		$balance_note = '';
+		$labels       = self::kmeans_best_labels( $scaled, $k, self::KMEANS_RESTARTS_FINAL, false, count( $selected ) );
+		if ( ! empty( $labels ) ) {
+			$sil     = self::silhouette_avg( $scaled, $labels, $k );
+			$balance = self::cluster_balance_ratio( $labels, $k );
+			$counts = self::cluster_counts( $labels, $k );
+			$shape  = self::partition_shape_stats( $counts, count( $labels ) );
+			$balance_note = sprintf(
+				/* translators: 1: silhouette, 2: balance %%, 3: effective clusters, 4: top-2 share %% */
+				__( ' Наглядность: силуэт %1$s, равномерность %2$s%%, содержательных кластеров %3$d, две крупнейшие — %4$s%% стран.', 'worldstat-ergonomics' ),
+				(string) round( $sil, 2 ),
+				(string) round( $balance * 100.0, 0 ),
+				(int) $shape['effective'],
+				(string) round( $shape['top2_share'] * 100.0, 0 )
+			);
+		}
 
 		$message = sprintf(
 			/* translators: 1: feature count, 2: k, 3: country count */
-			__( 'Подобрано %1$d признаков и k = %2$d по %3$d странам (показатели из CSV, как в матрице критериев).', 'worldstat-ergonomics' ),
+			__( 'Подобрано %1$d признаков и k = %2$d по %3$d странам (признаки и k выбраны для наиболее различимых кластеров на карте/графике).', 'worldstat-ergonomics' ),
 			count( $selected ),
 			$k,
 			$matrix_n
-		);
+		) . $balance_note;
 		if ( $partial_tune ) {
 			$message .= ' ' . sprintf(
 				/* translators: %d: recommended minimum country count */
@@ -242,6 +276,548 @@ class WSErgo_Macro_Cluster_Optimizer {
 	}
 
 	/**
+	 * Жадный подбор признаков: максимизируем различимость кластеров (силуэт), а не только CV.
+	 *
+	 * @param array<string, array<string, float>>                    $rows
+	 * @param array<string, array{cv:float,coverage:float,...}> $scored
+	 * @return list<string>
+	 */
+	private static function clear_tune_cache(): void {
+		self::$scaled_matrix_cache = array();
+	}
+
+	/**
+	 * @param list<string> $features
+	 * @return list<list<float>>|null
+	 */
+	private static function get_scaled_matrix_for_features( array $rows, array $features ): ?array {
+		if ( count( $features ) < 2 ) {
+			return null;
+		}
+		$sorted = array_values( $features );
+		sort( $sorted, SORT_STRING );
+		$key = implode( '|', $sorted );
+		if ( isset( self::$scaled_matrix_cache[ $key ] ) ) {
+			return self::$scaled_matrix_cache[ $key ];
+		}
+		$matrix = self::build_matrix_imputed( $rows, $features );
+		if ( count( $matrix ) < self::MIN_COUNTRIES ) {
+			$matrix = self::build_matrix( $rows, $features );
+		}
+		if ( count( $matrix ) < self::MIN_COUNTRIES ) {
+			return null;
+		}
+		$X = self::standard_scale_rows( $matrix );
+		self::$scaled_matrix_cache[ $key ] = $X;
+		return $X;
+	}
+
+	/**
+	 * Несколько значений k вокруг √n для быстрого перебора.
+	 *
+	 * @return list<int>
+	 */
+	/**
+	 * Верхняя граница k: меньше при малом числе признаков (2D не тянет k=12).
+	 */
+	private static function max_k_allowed( int $n, int $num_features ): int {
+		$d        = max( 2, $num_features );
+		$sqrt_cap = max( 3, (int) floor( sqrt( max( 4, $n ) ) / 1.35 ) );
+		$dim_cap  = 1 + (int) floor( 1.6 * $d );
+		return max( 2, min( 8, $sqrt_cap, $dim_cap, max( 2, $n - 1 ) ) );
+	}
+
+	/**
+	 * @return list<int>
+	 */
+	private static function probe_k_values( int $n, int $num_features ): array {
+		$k_max = self::max_k_allowed( $n, $num_features );
+		$mid   = max( 3, (int) round( sqrt( max( 4, $n ) ) / 1.5 ) );
+		$want  = array( $mid - 1, $mid, $mid + 1 );
+		$out   = array();
+		foreach ( $want as $k ) {
+			if ( $k >= 2 && $k <= $k_max ) {
+				$out[ $k ] = true;
+			}
+		}
+		if ( empty( $out ) ) {
+			$out[ min( $k_max, max( 2, $mid ) ) ] = true;
+		}
+		return array_keys( $out );
+	}
+
+	/**
+	 * Добрать некоррелированные признаки до MIN_FEATURES.
+	 *
+	 * @param array<string, array{cv:float,...}> $scored
+	 * @param list<string>                     $selected
+	 * @return list<string>
+	 */
+	private static function ensure_min_features( array $rows, array $scored, array $selected ): array {
+		$selected = array_values( array_unique( array_map( 'sanitize_key', $selected ) ) );
+		if ( count( $selected ) >= self::MIN_FEATURES ) {
+			return $selected;
+		}
+		foreach ( array_keys( $scored ) as $sig ) {
+			if ( in_array( $sig, $selected, true ) ) {
+				continue;
+			}
+			$ok = true;
+			foreach ( $selected as $prev ) {
+				$r = self::pearson_correlation( $rows, $sig, $prev );
+				if ( is_finite( $r ) && abs( $r ) > self::MAX_CORR ) {
+					$ok = false;
+					break;
+				}
+			}
+			if ( $ok ) {
+				$selected[] = $sig;
+			}
+			if ( count( $selected ) >= self::MIN_FEATURES ) {
+				break;
+			}
+		}
+		return $selected;
+	}
+
+	/**
+	 * Стартовый набор: топ по CV, попарно некоррелированные.
+	 *
+	 * @param list<string> $pool
+	 * @return list<string>
+	 */
+	private static function seed_uncorrelated_from_pool( array $rows, array $pool, int $target ): array {
+		$selected = array();
+		foreach ( $pool as $sig ) {
+			if ( count( $selected ) >= $target ) {
+				break;
+			}
+			$ok = true;
+			foreach ( $selected as $prev ) {
+				$r = self::pearson_correlation( $rows, $sig, $prev );
+				if ( is_finite( $r ) && abs( $r ) > self::MAX_CORR ) {
+					$ok = false;
+					break;
+				}
+			}
+			if ( $ok ) {
+				$selected[] = $sig;
+			}
+		}
+		return $selected;
+	}
+
+	/**
+	 * @param list<int> $counts
+	 * @return array{micro:int,singletons:int,min_size:int,effective:int,top2_share:float}
+	 */
+	private static function partition_shape_stats( array $counts, int $n ): array {
+		$n        = max( 1, $n );
+		$min_size = max( 3, (int) ceil( $n * self::MIN_CLUSTER_SIZE_FRAC ) );
+		$micro    = 0;
+		$singletons = 0;
+		$effective  = 0;
+		$sorted     = $counts;
+		rsort( $sorted, SORT_NUMERIC );
+		foreach ( $counts as $c ) {
+			if ( $c <= 0 ) {
+				continue;
+			}
+			if ( $c === 1 ) {
+				++$singletons;
+			}
+			if ( $c < $min_size ) {
+				++$micro;
+			} else {
+				++$effective;
+			}
+		}
+		$top2 = ( ( $sorted[0] ?? 0 ) + ( $sorted[1] ?? 0 ) ) / (float) $n;
+		return array(
+			'micro'       => $micro,
+			'singletons'  => $singletons,
+			'min_size'    => $min_size,
+			'effective'   => $effective,
+			'top2_share'  => $top2,
+		);
+	}
+
+	/**
+	 * Штраф за «два мешка», одиночки и слишком большое k относительно числа признаков.
+	 *
+	 * @param list<int> $counts
+	 */
+	private static function partition_shape_penalty( array $counts, int $n, int $k, int $num_features ): float {
+		$shape = self::partition_shape_stats( $counts, $n );
+		$p     = 0.0;
+
+		if ( $shape['top2_share'] > self::MAX_TOP2_CLUSTER_SHARE ) {
+			$p += ( $shape['top2_share'] - self::MAX_TOP2_CLUSTER_SHARE ) * 3.5;
+		}
+		$p += $shape['singletons'] * 0.1;
+		if ( $shape['micro'] >= 2 ) {
+			$p += 0.12 * ( $shape['micro'] - 1 );
+		}
+		if ( $k >= 5 && $shape['singletons'] > 0 ) {
+			$p += 0.18;
+		}
+		$want_effective = max( 2, min( $k, (int) floor( sqrt( max( 4, $n ) ) / 2 ) ) );
+		if ( $shape['effective'] < $want_effective && $k > $shape['effective'] + 1 ) {
+			$p += 0.15 * ( $k - $shape['effective'] );
+		}
+		$k_cap = self::max_k_allowed( $n, $num_features );
+		if ( $k > $k_cap ) {
+			$p += 0.25 * ( $k - $k_cap );
+		}
+
+		return $p;
+	}
+
+	private static function select_features_for_separation( array $rows, array $scored ): array {
+		$candidates = array_keys( $scored );
+		if ( count( $candidates ) < 2 ) {
+			return array();
+		}
+
+		$top_n = min( self::TUNE_TOP_CANDIDATES, count( $candidates ) );
+		$pool  = array_slice( $candidates, 0, $top_n );
+
+		$seed_target = min( self::MIN_FEATURES, count( $pool ), self::MAX_FEATURES );
+		$selected    = self::seed_uncorrelated_from_pool( $rows, $pool, max( 2, $seed_target ) );
+		if ( count( $selected ) < 2 ) {
+			return array();
+		}
+
+		$best_global = self::evaluate_feature_set_quality_fast( $rows, $selected );
+
+		$improved = true;
+		while ( $improved && count( $selected ) < self::MAX_FEATURES ) {
+			$improved = false;
+			$best_add = null;
+			$best_q   = $best_global;
+			$margin   = count( $selected ) < self::MIN_FEATURES ? 0.0 : 0.008;
+
+			foreach ( $pool as $sig ) {
+				if ( in_array( $sig, $selected, true ) ) {
+					continue;
+				}
+				$ok_corr = true;
+				foreach ( $selected as $prev ) {
+					$r = self::pearson_correlation( $rows, $sig, $prev );
+					if ( is_finite( $r ) && abs( $r ) > self::MAX_CORR ) {
+						$ok_corr = false;
+						break;
+					}
+				}
+				if ( ! $ok_corr ) {
+					continue;
+				}
+
+				$trial = array_merge( $selected, array( $sig ) );
+				$q     = self::evaluate_feature_set_quality_fast( $rows, $trial );
+				if ( $q > $best_q + $margin ) {
+					$best_q   = $q;
+					$best_add = $sig;
+				}
+			}
+
+			if ( null !== $best_add ) {
+				$selected[]  = $best_add;
+				$best_global = $best_q;
+				$improved    = true;
+			} elseif ( count( $selected ) < self::MIN_FEATURES ) {
+				$selected = self::ensure_min_features( $rows, $scored, $selected );
+				break;
+			}
+		}
+
+		return self::ensure_min_features( $rows, $scored, $selected );
+	}
+
+	/**
+	 * Быстрая оценка набора признаков (без O(n²) силуэта).
+	 *
+	 * @param array<string, array<string, float>> $rows
+	 * @param list<string>                        $features
+	 */
+	private static function evaluate_feature_set_quality_fast( array $rows, array $features ): float {
+		$X = self::get_scaled_matrix_for_features( $rows, $features );
+		if ( null === $X ) {
+			return -1.0;
+		}
+		$n    = count( $X );
+		$d    = count( $features );
+		$best = -1.0;
+		foreach ( self::probe_k_values( $n, $d ) as $k ) {
+			$labels = self::kmeans_best_labels( $X, $k, self::KMEANS_RESTARTS_PROBE, true, $d );
+			$q      = self::cluster_quality_score_fast( $X, $labels, $k, $d );
+			if ( $q > $best ) {
+				$best = $q;
+			}
+		}
+		$dim_bonus = max( 0, $d - self::MIN_FEATURES ) * 0.012;
+		return $best + $dim_bonus;
+	}
+
+	/**
+	 * @param list<list<float>> $X
+	 * @return list<int>
+	 */
+	private static function kmeans_best_labels( array $X, int $k, int $restarts, bool $use_fast_score, int $num_features = 0 ): array {
+		$n = count( $X );
+		if ( $n < 1 ) {
+			return array();
+		}
+		$k            = max( 1, min( $k, $n ) );
+		$restarts     = max( 1, $restarts );
+		$num_features = max( 2, $num_features > 0 ? $num_features : count( $X[0] ?? array() ) );
+		$best_labels  = null;
+		$best_quality = -INF;
+
+		for ( $r = 0; $r < $restarts; $r++ ) {
+			$labels = class_exists( 'WSErgo_Country_Macro_Calculator' )
+				? WSErgo_Country_Macro_Calculator::kmeans_labels_for_matrix( $X, $k, 50 )
+				: self::kmeans_legacy( $X, $k, 50 );
+			$q      = $use_fast_score
+				? self::cluster_quality_score_fast( $X, $labels, $k, $num_features )
+				: self::cluster_quality_score( $X, $labels, $k, $num_features );
+			if ( $q > $best_quality ) {
+				$best_quality = $q;
+				$best_labels  = $labels;
+			}
+		}
+
+		if ( null === $best_labels ) {
+			return array_fill( 0, $n, 0 );
+		}
+		return $best_labels;
+	}
+
+	/**
+	 * Быстрая оценка без силуэта (WCSS + доля крупнейшего кластера).
+	 *
+	 * @param list<list<float>> $X
+	 * @param list<int>         $labels
+	 */
+	private static function cluster_quality_score_fast( array $X, array $labels, int $k, int $num_features = 0 ): float {
+		$n = count( $X );
+		if ( $n < $k + 1 || $k < 2 ) {
+			return -1.0;
+		}
+
+		$num_features = max( 2, $num_features > 0 ? $num_features : count( $X[0] ?? array() ) );
+		$counts       = self::cluster_counts( $labels, $k );
+		$max_c        = max( $counts );
+		$min_c        = min( $counts );
+		$max_share    = $max_c / (float) $n;
+		$balance      = $min_c / max( 1, $max_c );
+		$shape        = self::partition_shape_stats( $counts, $n );
+
+		if ( $max_share > 0.85 ) {
+			return -1.0 + ( 1.0 - $max_share );
+		}
+
+		$wcss = self::within_cluster_ss( $X, $labels, $k );
+		$fit  = 1.0 / ( 1.0 + $wcss / max( 1.0, (float) $n ) );
+
+		$penalty = self::partition_shape_penalty( $counts, $n, $k, $num_features );
+		if ( $max_share > self::MAX_DOMINANT_CLUSTER_SHARE ) {
+			$penalty += ( $max_share - self::MAX_DOMINANT_CLUSTER_SHARE ) * 2.5;
+		}
+
+		$effective_bonus = min( 0.12, $shape['effective'] / max( 1.0, (float) $k ) * 0.12 );
+
+		return max( 0.0, $fit * 0.5 + ( 1.0 - $max_share ) * 0.22 + $balance * 0.13 + $effective_bonus - $penalty );
+	}
+
+	/**
+	 * Сводная оценка разбиения для автоподбора (выше = нагляднее на карте).
+	 *
+	 * @param list<list<float>> $X
+	 * @param list<int>         $labels
+	 */
+	private static function cluster_quality_score( array $X, array $labels, int $k, int $num_features = 0 ): float {
+		$n = count( $X );
+		if ( $n < $k + 1 || $k < 2 ) {
+			return -1.0;
+		}
+
+		$num_features = max( 2, $num_features > 0 ? $num_features : count( $X[0] ?? array() ) );
+		$counts       = self::cluster_counts( $labels, $k );
+		$max_c        = max( $counts );
+		$min_c        = min( $counts );
+		$max_share    = $max_c / (float) $n;
+		$non_empty    = 0;
+		foreach ( $counts as $cnt ) {
+			if ( $cnt > 0 ) {
+				++$non_empty;
+			}
+		}
+		if ( $non_empty < $k ) {
+			return -1.0;
+		}
+
+		if ( $max_share > 0.82 ) {
+			return -1.0 + ( 1.0 - $max_share );
+		}
+
+		$sil     = self::silhouette_avg( $X, $labels, $k );
+		$balance = $min_c / max( 1, $max_c );
+		$shape   = self::partition_shape_stats( $counts, $n );
+
+		$penalty = self::partition_shape_penalty( $counts, $n, $k, $num_features );
+		if ( $max_share > self::MAX_DOMINANT_CLUSTER_SHARE ) {
+			$penalty += ( $max_share - self::MAX_DOMINANT_CLUSTER_SHARE ) * 3.0;
+		}
+		if ( $shape['singletons'] > 0 && $k >= 4 ) {
+			$penalty += 0.08 * $shape['singletons'];
+		}
+
+		$effective_bonus = min( 0.1, $shape['effective'] / max( 1.0, (float) $k ) * 0.1 );
+
+		return max(
+			0.0,
+			$sil * 0.55 + ( 1.0 - $max_share ) * 0.2 + $balance * 0.12 + $effective_bonus - $penalty
+		);
+	}
+
+	/**
+	 * @param list<int> $labels
+	 * @return list<int>
+	 */
+	private static function cluster_counts( array $labels, int $k ): array {
+		$counts = array_fill( 0, max( 1, $k ), 0 );
+		foreach ( $labels as $lab ) {
+			$c = (int) $lab;
+			if ( $c >= 0 && $c < $k ) {
+				++$counts[ $c ];
+			}
+		}
+		return $counts;
+	}
+
+	/**
+	 * Средний коэффициент силуэта (−1…1, выше — кластеры различимее).
+	 *
+	 * @param list<list<float>> $X
+	 * @param list<int>         $labels
+	 */
+	private static function silhouette_avg( array $X, array $labels, int $k ): float {
+		$n = count( $X );
+		if ( $n < 3 || $k < 2 ) {
+			return 0.0;
+		}
+
+		$dists = array();
+		for ( $i = 0; $i < $n; $i++ ) {
+			$dists[ $i ] = array();
+			for ( $j = $i + 1; $j < $n; $j++ ) {
+				$d = sqrt( self::euclid_sq( $X[ $i ], $X[ $j ] ) );
+				$dists[ $i ][ $j ] = $d;
+				$dists[ $j ][ $i ] = $d;
+			}
+		}
+
+		$clusters = array_fill( 0, $k, array() );
+		for ( $i = 0; $i < $n; $i++ ) {
+			$c = (int) ( $labels[ $i ] ?? 0 );
+			if ( $c >= 0 && $c < $k ) {
+				$clusters[ $c ][] = $i;
+			}
+		}
+
+		$sum_s = 0.0;
+		$cnt_s = 0;
+		for ( $i = 0; $i < $n; $i++ ) {
+			$c    = (int) ( $labels[ $i ] ?? 0 );
+			$same = $clusters[ $c ] ?? array();
+			if ( count( $same ) <= 1 ) {
+				continue;
+			}
+
+			$a = 0.0;
+			foreach ( $same as $j ) {
+				if ( $j === $i ) {
+					continue;
+				}
+				$a += $dists[ $i ][ $j ];
+			}
+			$a /= ( count( $same ) - 1 );
+
+			$b = INF;
+			for ( $c2 = 0; $c2 < $k; $c2++ ) {
+				if ( $c2 === $c || count( $clusters[ $c2 ] ) < 1 ) {
+					continue;
+				}
+				$other = 0.0;
+				foreach ( $clusters[ $c2 ] as $j ) {
+					$other += $dists[ $i ][ $j ];
+				}
+				$other /= count( $clusters[ $c2 ] );
+				if ( $other < $b ) {
+					$b = $other;
+				}
+			}
+			if ( ! is_finite( $b ) ) {
+				continue;
+			}
+			$den = max( $a, $b, 1e-12 );
+			$sum_s += ( $b - $a ) / $den;
+			++$cnt_s;
+		}
+
+		return $cnt_s > 0 ? $sum_s / $cnt_s : 0.0;
+	}
+
+	/**
+	 * @param list<float> $a
+	 * @param list<float> $b
+	 */
+	private static function euclid_sq( array $a, array $b ): float {
+		$s = 0.0;
+		$d = min( count( $a ), count( $b ) );
+		for ( $j = 0; $j < $d; $j++ ) {
+			$diff = $a[ $j ] - $b[ $j ];
+			$s   += $diff * $diff;
+		}
+		return $s;
+	}
+
+	/**
+	 * @param list<list<float>> $X
+	 */
+	private static function optimal_k_for_separation( array $X, int $num_features ): int {
+		$n        = count( $X );
+		$k_min    = 2;
+		$num_features = max( 2, $num_features );
+		$k_max    = self::max_k_allowed( $n, $num_features );
+		if ( $n <= $k_max ) {
+			$k_max = max( $k_min, $n - 1 );
+		}
+
+		$fast_scores = array();
+		for ( $k = $k_min; $k <= $k_max; $k++ ) {
+			$labels = self::kmeans_best_labels( $X, $k, self::KMEANS_RESTARTS_PROBE, true, $num_features );
+			$fast_scores[ $k ] = self::cluster_quality_score_fast( $X, $labels, $k, $num_features );
+		}
+		arsort( $fast_scores, SORT_NUMERIC );
+		$finalists = array_slice( array_keys( $fast_scores ), 0, 3 );
+
+		$best_k = $finalists[0] ?? min( 5, $k_max );
+		$best_q = -INF;
+		foreach ( $finalists as $k ) {
+			$labels = self::kmeans_best_labels( $X, $k, self::KMEANS_RESTARTS_FINAL, false, $num_features );
+			$q      = self::cluster_quality_score( $X, $labels, $k, $num_features );
+			if ( $q > $best_q ) {
+				$best_q = $q;
+				$best_k = $k;
+			}
+		}
+
+		return max( $k_min, $best_k );
+	}
+
+	/**
 	 * @param array<string, array<string, float>> $rows
 	 * @param list<string>                        $features
 	 * @return list<list<float>>
@@ -336,41 +912,25 @@ class WSErgo_Macro_Cluster_Optimizer {
 	}
 
 	/**
-	 * @param list<list<float>> $X
+	 * min(размеры кластеров) / max(размеры) ∈ (0, 1]; 1 = идеально равномерно.
+	 *
+	 * @param list<int> $labels
 	 */
-	private static function optimal_k_elbow( array $X ): int {
-		$n     = count( $X );
-		$k_min = 2;
-		$k_max = min( 12, max( $k_min, (int) round( sqrt( $n ) ) ) );
-		if ( $n <= $k_max ) {
-			$k_max = max( $k_min, $n - 1 );
-		}
-
-		$wcss = array();
-		for ( $k = $k_min; $k <= $k_max; $k++ ) {
-			$labels     = self::kmeans( $X, $k, 45 );
-			$wcss[ $k ] = self::within_cluster_ss( $X, $labels, $k );
-		}
-
-		$best_k  = min( 6, $k_max );
-		$max_imp = 0.0;
-		for ( $k = $k_min; $k < $k_max; $k++ ) {
-			$imp = ( $wcss[ $k ] ?? 0.0 ) - ( $wcss[ $k + 1 ] ?? 0.0 );
-			if ( $imp > $max_imp ) {
-				$max_imp = $imp;
+	private static function cluster_balance_ratio( array $labels, int $k ): float {
+		$k      = max( 1, $k );
+		$counts = array_fill( 0, $k, 0 );
+		foreach ( $labels as $lab ) {
+			$c = (int) $lab;
+			if ( $c >= 0 && $c < $k ) {
+				++$counts[ $c ];
 			}
 		}
-		if ( $max_imp < 1e-12 ) {
-			return $best_k;
+		$min_c = min( $counts );
+		$max_c = max( $counts );
+		if ( $max_c < 1 ) {
+			return 0.0;
 		}
-		$thresh = $max_imp * 0.12;
-		for ( $k = $k_min; $k < $k_max; $k++ ) {
-			$imp = ( $wcss[ $k ] ?? 0.0 ) - ( $wcss[ $k + 1 ] ?? 0.0 );
-			if ( $imp < $thresh ) {
-				return max( $k_min, $k );
-			}
-		}
-		return $best_k;
+		return $min_c / $max_c;
 	}
 
 	/**
@@ -516,10 +1076,12 @@ class WSErgo_Macro_Cluster_Optimizer {
 	}
 
 	/**
+	 * Устаревший k-means без квот (только fallback, если калькулятор недоступен).
+	 *
 	 * @param list<list<float>> $X
 	 * @return list<int>
 	 */
-	private static function kmeans( array $X, int $k, int $max_iter ): array {
+	private static function kmeans_legacy( array $X, int $k, int $max_iter ): array {
 		$n = count( $X );
 		if ( $n < 1 ) {
 			return array();
@@ -584,6 +1146,21 @@ class WSErgo_Macro_Cluster_Optimizer {
 	 *
 	 * @param list<string> $features
 	 */
+	/**
+	 * Лучшее разбиение k-means++ из нескольких перезапусков (для превью и расчёта).
+	 *
+	 * @param list<list<float>> $X стандартизованная матрица
+	 * @return list<int>
+	 */
+	public static function best_cluster_labels( array $X, int $k ): array {
+		return self::kmeans_best_labels( $X, $k, self::KMEANS_RESTARTS_FINAL, true );
+	}
+
+	/**
+	 * Сохранить подобранные значения в опции WordPress.
+	 *
+	 * @param list<string> $features
+	 */
 	public static function apply_to_options( array $features, int $k, string $scope = 'country' ): void {
 		if ( ! class_exists( 'WSErgo_Settings' ) ) {
 			return;
@@ -600,7 +1177,10 @@ class WSErgo_Macro_Cluster_Optimizer {
 		if ( count( $clean ) < 2 ) {
 			return;
 		}
-		$k = max( 2, min( 12, $k ) );
+		if ( count( $clean ) < self::MIN_FEATURES ) {
+			return;
+		}
+		$k = max( 2, min( self::max_k_allowed( 300, count( $clean ) ), $k ) );
 		if ( 'city' === $scope ) {
 			update_option( WSErgo_Settings::OPTION_CITY_MACRO_CLUSTER_FEATURES, $clean );
 			update_option( WSErgo_Settings::OPTION_CITY_MACRO_K_CLUSTERS, $k );

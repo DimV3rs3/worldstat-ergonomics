@@ -164,14 +164,40 @@ class WSErgo_Country_Admin {
 
 		$js_country = 'public/assets/js/wsergo-settings-country.js';
 		$js_tune    = 'public/assets/js/wsergo-cluster-tune.js';
+		$js_viz     = 'public/assets/js/wsergo-cluster-viz.js';
+		$css_viz    = 'public/assets/css/wsergo-cluster-viz.css';
 		$url_country = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::url( 'country', $js_country ) : WSERGO_URL . 'levels/country/' . $js_country;
 		$url_tune    = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::url( 'country', $js_tune ) : WSERGO_URL . 'levels/country/' . $js_tune;
+		$url_viz     = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::url( 'country', $js_viz ) : WSERGO_URL . 'levels/country/' . $js_viz;
+		$url_css_viz = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::url( 'country', $css_viz ) : WSERGO_URL . 'levels/country/' . $css_viz;
 		$ver_country = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $js_country ) : WSERGO_VERSION;
 		$ver_tune    = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $js_tune ) : WSERGO_VERSION;
+		$ver_viz     = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $js_viz ) : WSERGO_VERSION;
+		$ver_css_viz = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $css_viz ) : WSERGO_VERSION;
 
+		$topo_url = get_template_directory_uri() . '/assets/data/countries-110m.json';
+		if ( defined( 'WSP_ASSETS_URL' ) ) {
+			wp_enqueue_style( 'leaflet', WSP_ASSETS_URL . 'vendor/leaflet/leaflet.css', [], '1.9' );
+			wp_enqueue_script( 'leaflet', WSP_ASSETS_URL . 'vendor/leaflet/leaflet.js', [], '1.9', true );
+			wp_enqueue_script(
+				'topojson-client',
+				get_template_directory_uri() . '/assets/vendor/topojson/topojson-client.min.js',
+				[],
+				'3.1.0',
+				true
+			);
+		}
+
+		wp_enqueue_style( 'wsergo-cluster-viz', $url_css_viz, defined( 'WSP_ASSETS_URL' ) ? [ 'leaflet' ] : [], $ver_css_viz );
 		wp_enqueue_script( 'chart-js', 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js', [], '4.4.1', true );
 		wp_enqueue_script( 'wsergo-settings-country', $url_country, [ 'jquery', 'chart-js' ], $ver_country, true );
 		wp_enqueue_script( 'wsergo-cluster-tune', $url_tune, [ 'jquery' ], $ver_tune, true );
+		$viz_deps = [ 'jquery', 'chart-js', 'wsergo-cluster-tune' ];
+		if ( defined( 'WSP_ASSETS_URL' ) ) {
+			$viz_deps[] = 'leaflet';
+			$viz_deps[] = 'topojson-client';
+		}
+		wp_enqueue_script( 'wsergo-cluster-viz', $url_viz, $viz_deps, $ver_viz, true );
 		wp_localize_script(
 			'wsergo-settings-country',
 			'wsergoAdmin',
@@ -187,7 +213,7 @@ class WSErgo_Country_Admin {
 				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 				'nonce'   => wp_create_nonce( 'wsergo_admin' ),
 				'i18n'    => [
-					'running'   => __( 'Анализ данных и подбор параметров…', 'worldstat-ergonomics' ),
+					'running'   => __( 'Анализ данных и подбор параметров (обычно 15–40 с)…', 'worldstat-ergonomics' ),
 					'done'      => __( 'Параметры применены к форме. Нажмите «Сохранить настройки» внизу страницы.', 'worldstat-ergonomics' ),
 					'saved'     => __( 'Параметры сохранены, кэш пересчёта сброшен.', 'worldstat-ergonomics' ),
 					'error'     => __( 'Не удалось выполнить автоподбор.', 'worldstat-ergonomics' ),
@@ -195,6 +221,30 @@ class WSErgo_Country_Admin {
 					'cv'        => __( 'разброс (CV)', 'worldstat-ergonomics' ),
 					'coverage'  => __( 'покрытие', 'worldstat-ergonomics' ),
 					'selected'  => __( 'в подборе', 'worldstat-ergonomics' ),
+				],
+			]
+		);
+		wp_localize_script(
+			'wsergo-cluster-viz',
+			'wsergoClusterViz',
+			[
+				'ajaxUrl'        => admin_url( 'admin-ajax.php' ),
+				'nonce'          => wp_create_nonce( 'wsergo_admin' ),
+				'previewAction'  => 'wsergo_cluster_preview',
+				'topoUrl'        => $topo_url,
+				'defaultColors'  => class_exists( 'WSErgo_Country_Macro_Calculator' )
+					? WSErgo_Country_Macro_Calculator::cluster_palette()
+					: [],
+				'i18n'           => [
+					'loading'       => __( 'Расчёт кластеров…', 'worldstat-ergonomics' ),
+					'needFeatures'  => __( 'Отметьте не меньше двух признаков.', 'worldstat-ergonomics' ),
+					'error'         => __( 'Не удалось построить превью.', 'worldstat-ergonomics' ),
+					'cluster'       => __( 'Кластер', 'worldstat-ergonomics' ),
+					'country'       => __( 'Страна', 'worldstat-ergonomics' ),
+					'distribution'  => __( 'Распределение по кластерам', 'worldstat-ergonomics' ),
+					'scatterTitle'  => __( 'Страны в пространстве признаков (z-score)', 'worldstat-ergonomics' ),
+					'summary'       => __( 'k = %1$d, стран: %2$d, год: %3$d', 'worldstat-ergonomics' ),
+					'noMap'         => __( 'Карта недоступна (нет Leaflet/TopoJSON темы).', 'worldstat-ergonomics' ),
 				],
 			]
 		);

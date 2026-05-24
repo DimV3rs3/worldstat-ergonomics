@@ -33,6 +33,9 @@ class WSErgo_Country_Macro_Calculator {
 	/** @var array<string, string>|null ISO2 => ISO3 из data/countries.json платформы */
 	private static $iso2_to_iso3_file_cache = null;
 
+	/** @var array<string, array{iso2:string,name:string}>|null ISO3 => метаданные страны */
+	private static $iso3_country_meta_cache = null;
+
 	/** Признаки для k-means (вектор для кластеризации стран). */
 	private const CLUSTER_FEATURES = [
 		'pop_density__psn_per_km_sq',
@@ -927,6 +930,222 @@ class WSErgo_Country_Macro_Calculator {
 	}
 
 	/**
+	 * Палитра кластеров для админ-визуализации (до 12).
+	 *
+	 * @return list<string>
+	 */
+	public static function cluster_palette(): array {
+		return array(
+			'#2563eb',
+			'#16a34a',
+			'#dc2626',
+			'#9333ea',
+			'#ea580c',
+			'#0891b2',
+			'#ca8a04',
+			'#db2777',
+			'#4f46e5',
+			'#059669',
+			'#b45309',
+			'#7c3aed',
+		);
+	}
+
+	/**
+	 * ISO3 => { iso2, name } из countries.json платформы.
+	 *
+	 * @return array<string, array{iso2:string,name:string}>
+	 */
+	public static function iso3_country_meta_map(): array {
+		if ( self::$iso3_country_meta_cache !== null ) {
+			return self::$iso3_country_meta_cache;
+		}
+		$out  = array();
+		$path = defined( 'WSP_DATA_DIR' ) ? (string) WSP_DATA_DIR . 'countries.json' : '';
+		if ( ( $path === '' || ! is_readable( $path ) ) && defined( 'WP_PLUGIN_DIR' ) ) {
+			$path = (string) WP_PLUGIN_DIR . 'world-statistics-platform/data/countries.json';
+		}
+		if ( $path !== '' && is_readable( $path ) ) {
+			$raw = file_get_contents( $path );
+			$arr = is_string( $raw ) ? json_decode( $raw, true ) : null;
+			if ( is_array( $arr ) ) {
+				foreach ( $arr as $row ) {
+					if ( ! is_array( $row ) ) {
+						continue;
+					}
+					$a3 = strtoupper( (string) ( $row['iso3'] ?? '' ) );
+					$a2 = strtoupper( (string) ( $row['iso2'] ?? '' ) );
+					if ( strlen( $a3 ) !== 3 || strlen( $a2 ) !== 2 ) {
+						continue;
+					}
+					$name       = (string) ( $row['name_ru'] ?? $row['name_en'] ?? $a3 );
+					$out[ $a3 ] = array(
+						'iso2' => $a2,
+						'name' => $name,
+					);
+				}
+			}
+		}
+		self::$iso3_country_meta_cache = $out;
+		return $out;
+	}
+
+	/**
+	 * Превью k-means для админки (текущие признаки и k из формы).
+	 *
+	 * @param list<string> $features
+	 * @return array<string, mixed>
+	 */
+	public static function preview_macro_clusters( string $scope, array $features, int $k ): array {
+		$scope = ( 'city' === $scope ) ? 'city' : 'country';
+		$allow = array_flip( self::macro_cluster_signal_allowlist( $scope ) );
+
+		$clean = array();
+		foreach ( $features as $sig ) {
+			$sig = sanitize_key( (string) $sig );
+			if ( $sig !== '' && isset( $allow[ $sig ] ) ) {
+				$clean[ $sig ] = true;
+			}
+		}
+		$features = array_keys( $clean );
+		if ( count( $features ) < 2 ) {
+			return array(
+				'ok'      => false,
+				'message' => __( 'Отметьте не меньше двух признаков для кластеризации.', 'worldstat-ergonomics' ),
+			);
+		}
+
+		$bundle = ( 'city' === $scope ) ? self::get_city_full_bundle() : self::get_full_bundle();
+		$rows   = isset( $bundle['raw_rows'] ) && is_array( $bundle['raw_rows'] ) ? $bundle['raw_rows'] : array();
+		if ( count( $rows ) < 2 ) {
+			return array(
+				'ok'      => false,
+				'message' => __( 'Недостаточно стран в CSV за опорный год.', 'worldstat-ergonomics' ),
+			);
+		}
+
+		$run = self::run_kmeans_on_rows( $rows, $features, $k );
+		if ( empty( $run['ok'] ) ) {
+			return $run;
+		}
+
+		$meta_map   = self::iso3_country_meta_map();
+		$countries  = array();
+		$choropleth = array();
+		$sizes      = array_fill( 0, (int) $run['k'], 0 );
+
+		foreach ( $run['keys'] as $i => $iso3 ) {
+			$cid  = (int) ( $run['labels'][ $i ] ?? 0 );
+			$disp = $cid + 1;
+			$meta = $meta_map[ $iso3 ] ?? array(
+				'iso2' => '',
+				'name' => $iso3,
+			);
+			$pt           = $run['scaled'][ $i ] ?? array();
+			$countries[]  = array(
+				'iso3'    => $iso3,
+				'iso2'    => (string) $meta['iso2'],
+				'name'    => (string) $meta['name'],
+				'cluster' => $disp,
+				'x'       => isset( $pt[0] ) ? round( (float) $pt[0], 4 ) : 0.0,
+				'y'       => isset( $pt[1] ) ? round( (float) $pt[1], 4 ) : 0.0,
+			);
+			if ( $cid >= 0 && $cid < (int) $run['k'] ) {
+				++$sizes[ $cid ];
+			}
+			if ( strlen( (string) $meta['iso2'] ) === 2 ) {
+				$choropleth[ (string) $meta['iso2'] ] = $disp;
+			}
+		}
+
+		usort(
+			$countries,
+			static function ( $a, $b ) {
+				$c = ( (int) $a['cluster'] ) <=> ( (int) $b['cluster'] );
+				return 0 !== $c ? $c : strcmp( (string) $a['name'], (string) $b['name'] );
+			}
+		);
+
+		$feat_labels = array();
+		foreach ( $features as $f ) {
+			$feat_labels[ $f ] = self::data_label_ru( $f );
+		}
+
+		return array(
+			'ok'             => true,
+			'k'              => (int) $run['k'],
+			'features'       => $features,
+			'feature_labels' => $feat_labels,
+			'axis_x'         => $features[0],
+			'axis_y'         => $features[1] ?? $features[0],
+			'countries'      => $countries,
+			'choropleth'     => $choropleth,
+			'cluster_sizes'  => array_values( $sizes ),
+			'colors'         => array_slice( self::cluster_palette(), 0, (int) $run['k'] ),
+			'year'           => (int) ( $bundle['y'] ?? 0 ),
+			'n_countries'    => count( $countries ),
+		);
+	}
+
+	/**
+	 * @param array<string, array<string, float>> $rows
+	 * @param list<string>                        $features
+	 * @return array<string, mixed>
+	 */
+	private static function run_kmeans_on_rows( array $rows, array $features, int $k ): array {
+		$medians = array();
+		foreach ( $features as $feat ) {
+			$col = array();
+			foreach ( $rows as $r ) {
+				if ( is_array( $r ) && isset( $r[ $feat ] ) && is_finite( (float) $r[ $feat ] ) ) {
+					$col[] = (float) $r[ $feat ];
+				}
+			}
+			$medians[ $feat ] = self::median_floats( $col );
+		}
+
+		$matrix = array();
+		$keys   = array();
+		foreach ( $rows as $iso3 => $r ) {
+			if ( ! is_array( $r ) ) {
+				continue;
+			}
+			$vec = array();
+			foreach ( $features as $feat ) {
+				$v = isset( $r[ $feat ] ) ? (float) $r[ $feat ] : NAN;
+				if ( ! is_finite( $v ) ) {
+					$v = $medians[ $feat ];
+				}
+				$vec[] = $v;
+			}
+			$keys[]   = (string) $iso3;
+			$matrix[] = $vec;
+		}
+
+		if ( count( $matrix ) < 2 ) {
+			return array(
+				'ok'      => false,
+				'message' => __( 'Недостаточно стран с данными для кластеризации.', 'worldstat-ergonomics' ),
+			);
+		}
+
+		$scaled = self::standard_scale_rows( $matrix );
+		$k      = max( 2, min( 12, $k, count( $scaled ) ) );
+		$labels = self::kmeans( $scaled, $k, 80 );
+		if ( class_exists( 'WSErgo_Macro_Cluster_Optimizer' ) ) {
+			$labels = WSErgo_Macro_Cluster_Optimizer::best_cluster_labels( $scaled, $k );
+		}
+
+		return array(
+			'ok'     => true,
+			'keys'   => $keys,
+			'labels' => $labels,
+			'scaled' => $scaled,
+			'k'      => $k,
+		);
+	}
+
+	/**
 	 * Признаки k-means: из настроек (≥2 отмеченных) или встроенный список.
 	 *
 	 * @return list<string>
@@ -1207,8 +1426,19 @@ class WSErgo_Country_Macro_Calculator {
 		$scaled = self::standard_scale_rows( $matrix );
 		$k      = min( WSErgo_Settings::get_macro_k_clusters(), count( $scaled ) );
 		$labels = self::kmeans( $scaled, $k, 80 );
+		if ( class_exists( 'WSErgo_Macro_Cluster_Optimizer' ) ) {
+			$labels = WSErgo_Macro_Cluster_Optimizer::best_cluster_labels( $scaled, $k );
+		}
 
 		$n = count( $keys );
+		for ( $i = 0; $i < $n; $i++ ) {
+			$iso3 = $keys[ $i ];
+			if ( ! isset( $diag[ $iso3 ] ) || ! is_array( $diag[ $iso3 ] ) ) {
+				$diag[ $iso3 ] = array();
+			}
+			$diag[ $iso3 ]['kmeans_cluster'] = (int) ( $labels[ $i ] ?? 0 ) + 1;
+			$diag[ $iso3 ]['kmeans_k']         = $k;
+		}
 		$norm_cols = array();
 		foreach ( self::collect_normalization_columns() as $col ) {
 			$vals = array();
@@ -1380,8 +1610,19 @@ class WSErgo_Country_Macro_Calculator {
 		$scaled = self::standard_scale_rows( $matrix );
 		$k      = min( WSErgo_Settings::get_city_macro_k_clusters(), count( $scaled ) );
 		$labels = self::kmeans( $scaled, $k, 80 );
+		if ( class_exists( 'WSErgo_Macro_Cluster_Optimizer' ) ) {
+			$labels = WSErgo_Macro_Cluster_Optimizer::best_cluster_labels( $scaled, $k );
+		}
 
-		$n         = count( $keys );
+		$n = count( $keys );
+		for ( $i = 0; $i < $n; $i++ ) {
+			$iso3 = $keys[ $i ];
+			if ( ! isset( $diag[ $iso3 ] ) || ! is_array( $diag[ $iso3 ] ) ) {
+				$diag[ $iso3 ] = array();
+			}
+			$diag[ $iso3 ]['kmeans_cluster'] = (int) ( $labels[ $i ] ?? 0 ) + 1;
+			$diag[ $iso3 ]['kmeans_k']         = $k;
+		}
 		$norm_cols = array();
 		foreach ( self::collect_normalization_columns_city() as $col ) {
 			$vals = array();
@@ -1704,16 +1945,77 @@ class WSErgo_Country_Macro_Calculator {
 	}
 
 	/**
+	 * K-means для матрицы признаков (используется автоподбором и превью).
+	 *
+	 * @param list<list<float>> $X
+	 * @return list<int>
+	 */
+	public static function kmeans_labels_for_matrix( array $X, int $k, int $max_iter = 80 ): array {
+		return self::kmeans( $X, $k, $max_iter );
+	}
+
+	/**
+	 * K-means++: разнесённые начальные центроиды.
+	 *
+	 * @param list<list<float>> $X
+	 * @return list<list<float>>
+	 */
+	private static function kmeans_init_centroids_pp( array $X, int $k ): array {
+		$n = count( $X );
+		$d = count( $X[0] ?? array() );
+		$k = max( 1, min( $k, $n ) );
+		if ( $n < 1 || $d < 1 ) {
+			return array();
+		}
+		$centroids   = array();
+		$first       = function_exists( 'wp_rand' ) ? wp_rand( 0, $n - 1 ) : mt_rand( 0, $n - 1 );
+		$centroids[] = $X[ $first ];
+		$dists_sq    = array_fill( 0, $n, INF );
+		while ( count( $centroids ) < $k ) {
+			$last = $centroids[ count( $centroids ) - 1 ];
+			for ( $i = 0; $i < $n; $i++ ) {
+				$nd = self::euclid_sq( $X[ $i ], $last );
+				if ( $nd < $dists_sq[ $i ] ) {
+					$dists_sq[ $i ] = $nd;
+				}
+			}
+			$sum = array_sum( $dists_sq );
+			if ( $sum < 1e-12 ) {
+				$centroids[] = $X[ count( $centroids ) % $n ];
+				continue;
+			}
+			$rand_max = function_exists( 'mt_getrandmax' ) ? (int) mt_getrandmax() : 1000000;
+			$r        = ( function_exists( 'wp_rand' ) ? wp_rand( 0, $rand_max ) : mt_rand( 0, $rand_max ) ) / max( 1, $rand_max ) * $sum;
+			$pick     = 0;
+			$acc      = 0.0;
+			for ( $i = 0; $i < $n; $i++ ) {
+				$acc += $dists_sq[ $i ];
+				if ( $acc >= $r ) {
+					$pick = $i;
+					break;
+				}
+			}
+			$centroids[] = $X[ $pick ];
+		}
+		return $centroids;
+	}
+
+	/**
+	 * K-means (k-means++), назначение по ближайшему центроиду — естественные кластеры по данным.
+	 *
 	 * @param list<list<float>> $X уже масштабированные строки
 	 * @return list<int>
 	 */
 	private static function kmeans( array $X, int $k, int $max_iter ): array {
 		$n = count( $X );
-		$d = count( $X[0] );
-		$k = max( 1, min( $k, $n ) );
-		$centroids = array();
-		for ( $c = 0; $c < $k; $c++ ) {
-			$centroids[] = $X[ $c % $n ];
+		$d = count( $X[0] ?? array() );
+		if ( $n < 1 || $d < 1 ) {
+			return array();
+		}
+		$k         = max( 1, min( $k, $n ) );
+		$centroids = self::kmeans_init_centroids_pp( $X, $k );
+		if ( count( $centroids ) < $k ) {
+			return array_fill( 0, $n, 0 );
 		}
 		$labels = array_fill( 0, $n, 0 );
 		for ( $it = 0; $it < $max_iter; $it++ ) {
@@ -1728,9 +2030,9 @@ class WSErgo_Country_Macro_Calculator {
 						$best_c = $c;
 					}
 				}
-				if ( $labels[ $i ] !== $best_c ) {
+				if ( (int) $labels[ $i ] !== $best_c ) {
 					$labels[ $i ] = $best_c;
-					$changed        = true;
+					$changed      = true;
 				}
 			}
 			$sums   = array();
@@ -1739,7 +2041,7 @@ class WSErgo_Country_Macro_Calculator {
 				$sums[ $c ] = array_fill( 0, $d, 0.0 );
 			}
 			for ( $i = 0; $i < $n; $i++ ) {
-				$c = $labels[ $i ];
+				$c = (int) $labels[ $i ];
 				++$counts[ $c ];
 				for ( $j = 0; $j < $d; $j++ ) {
 					$sums[ $c ][ $j ] += $X[ $i ][ $j ];
@@ -1747,6 +2049,7 @@ class WSErgo_Country_Macro_Calculator {
 			}
 			for ( $c = 0; $c < $k; $c++ ) {
 				if ( $counts[ $c ] < 1 ) {
+					$centroids[ $c ] = $X[ $c % $n ];
 					continue;
 				}
 				for ( $j = 0; $j < $d; $j++ ) {

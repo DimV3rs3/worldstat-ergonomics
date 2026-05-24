@@ -227,23 +227,34 @@ $wsergo_scope_style = ! empty( $wsergo_scope_hidden ) ? ' style="display:none"' 
 					</table>
 					<hr />
 					<h3><?php esc_html_e( 'Признаки для k-means (макро)', 'worldstat-ergonomics' ); ?></h3>
-					<p class="description"><?php esc_html_e( 'Те же параметры, что в матрице критериев выше (столбцы CSV и пользовательские). Отметьте не меньше двух признаков для вектора кластеризации и нормализации внутри кластеров. «Автоподбор» анализирует разброс и корреляции в данных и подбирает подходящий набор признаков и число кластеров k (метод локтя).', 'worldstat-ergonomics' ); ?></p>
+					<p class="description"><?php esc_html_e( 'Те же параметры, что в матрице критериев выше (столбцы CSV и пользовательские). Отметьте не меньше двух признаков для вектора кластеризации и нормализации внутри кластеров. «Автоподбор» подбирает признаки и k так, чтобы кластеры были различимы на карте/графике (силуэт, без одного «мешка» из почти всех стран); в отчёте — силуэт и равномерность.', 'worldstat-ergonomics' ); ?></p>
 					<p style="margin:.75em 0;">
 						<button type="button" class="button button-primary wsergo-auto-tune-clusters" data-scope="country"><?php esc_html_e( 'Автоподбор признаков и k', 'worldstat-ergonomics' ); ?></button>
 						<button type="button" class="button wsergo-auto-tune-clusters-save" data-scope="country"><?php esc_html_e( 'Автоподбор и сохранить', 'worldstat-ergonomics' ); ?></button>
 						<span class="wsergo-auto-tune-status wsp-muted" style="margin-left:8px;"></span>
 					</p>
-					<div id="wsergo-cluster-features-country" class="wsergo-cluster-features-host" data-scope="country" data-wsergo-features-inline="1" style="max-height:220px;overflow:auto;border:1px solid #c3c4c7;padding:10px;background:#fff;">
-						<?php
-						if ( function_exists( 'wsergo_render_cluster_features_checkboxes' ) ) {
-							wsergo_render_cluster_features_checkboxes(
-								'country',
-								$signals_ui,
-								$cf_for_checkboxes,
-								WSErgo_Settings::OPTION_MACRO_CLUSTER_FEATURES
-							);
-						}
-						?>
+					<div class="wsergo-cluster-kmeans-layout">
+						<div class="wsergo-cluster-kmeans-features">
+							<div id="wsergo-cluster-features-country" class="wsergo-cluster-features-host" data-scope="country" data-wsergo-features-inline="1" style="max-height:320px;overflow:auto;border:1px solid #c3c4c7;padding:10px;background:#fff;">
+								<?php
+								if ( function_exists( 'wsergo_render_cluster_features_checkboxes' ) ) {
+									wsergo_render_cluster_features_checkboxes(
+										'country',
+										$signals_ui,
+										$cf_for_checkboxes,
+										WSErgo_Settings::OPTION_MACRO_CLUSTER_FEATURES
+									);
+								}
+								?>
+							</div>
+						</div>
+						<div class="wsergo-cluster-kmeans-viz">
+							<?php
+							if ( function_exists( 'wsergo_render_cluster_viz_host' ) ) {
+								wsergo_render_cluster_viz_host( 'country' );
+							}
+							?>
+						</div>
 					</div>
 					<div id="wsergo-cluster-tune-report-country" class="wsergo-cluster-tune-report" style="display:none;margin-top:10px;padding:10px;border:1px solid #c3c4c7;background:#fff;max-height:180px;overflow:auto;"></div>
 					<table class="form-table" role="presentation">
