@@ -82,11 +82,18 @@ class WSErgo_Country_Admin {
 		$macro_axes_six        = [ 'F', 'Cm', 'H', 'A', 'S', 'Ct' ];
 		$ref_macro_raw_row      = null;
 		$ref_macro_example_note = '';
-		if ( $macro_ref_country_id > 0 ) {
-			$iso2_ref = strtoupper( trim( (string) get_post_meta( $macro_ref_country_id, 'wsp_iso_alpha2', true ) ) );
-			if ( strlen( $iso2_ref ) === 2 ) {
-				$tref = get_the_title( $macro_ref_country_id );
-				$ref_macro_example_note = $tref !== '' ? $tref . ' (' . $iso2_ref . ', ' . (int) $macro_year . ')' : '';
+		if ( $macro_ref_country_id > 0 && class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			$ref_macro_raw_row = WSErgo_Country_Macro_Calculator::raw_row_for_country_post_id( $macro_ref_country_id, $macro_year );
+			$iso2_ref          = strtoupper( trim( (string) get_post_meta( $macro_ref_country_id, 'wsp_iso_alpha2', true ) ) );
+			$tref              = get_the_title( $macro_ref_country_id );
+			$bundle_y          = (int) ( WSErgo_Country_Macro_Calculator::get_full_bundle()['y'] ?? $macro_year );
+			if ( $tref !== '' || strlen( $iso2_ref ) === 2 ) {
+				$ref_macro_example_note = ( $tref !== '' ? $tref : $iso2_ref );
+				if ( strlen( $iso2_ref ) === 2 ) {
+					$ref_macro_example_note .= ' (' . $iso2_ref . ', ' . $bundle_y . ')';
+				} else {
+					$ref_macro_example_note .= ' (' . $bundle_y . ')';
+				}
 			}
 		}
 
@@ -172,8 +179,8 @@ class WSErgo_Country_Admin {
 		$url_css_viz = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::url( 'country', $css_viz ) : WSERGO_URL . 'levels/country/' . $css_viz;
 		$ver_country = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $js_country ) : WSERGO_VERSION;
 		$ver_tune    = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $js_tune ) : WSERGO_VERSION;
-		$ver_viz     = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $js_viz ) : WSERGO_VERSION;
-		$ver_css_viz = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $css_viz ) : WSERGO_VERSION;
+		$ver_viz     = ( class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $js_viz ) : WSERGO_VERSION ) . '-legend1';
+		$ver_css_viz = ( class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $css_viz ) : WSERGO_VERSION ) . '-iso3ru1';
 
 		$topo_url = get_template_directory_uri() . '/assets/data/countries-110m.json';
 		if ( defined( 'WSP_ASSETS_URL' ) ) {
@@ -224,6 +231,15 @@ class WSErgo_Country_Admin {
 				],
 			]
 		);
+		$cluster_country_labels = array();
+		if ( class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			$cluster_country_labels = WSErgo_Country_Macro_Calculator::wb_aggregate_labels_ru();
+			foreach ( WSErgo_Country_Macro_Calculator::iso3_country_meta_map() as $iso3 => $meta ) {
+				if ( is_array( $meta ) && ! empty( $meta['name'] ) ) {
+					$cluster_country_labels[ (string) $iso3 ] = (string) $meta['name'];
+				}
+			}
+		}
 		wp_localize_script(
 			'wsergo-cluster-viz',
 			'wsergoClusterViz',
@@ -232,6 +248,7 @@ class WSErgo_Country_Admin {
 				'nonce'          => wp_create_nonce( 'wsergo_admin' ),
 				'previewAction'  => 'wsergo_cluster_preview',
 				'topoUrl'        => $topo_url,
+				'countryLabels'  => $cluster_country_labels,
 				'defaultColors'  => class_exists( 'WSErgo_Country_Macro_Calculator' )
 					? WSErgo_Country_Macro_Calculator::cluster_palette()
 					: [],
@@ -245,6 +262,10 @@ class WSErgo_Country_Admin {
 					'scatterTitle'  => __( 'Страны в пространстве признаков (z-score)', 'worldstat-ergonomics' ),
 					'summary'       => __( 'k = %1$d, стран: %2$d, год: %3$d', 'worldstat-ergonomics' ),
 					'noMap'         => __( 'Карта недоступна (нет Leaflet/TopoJSON темы).', 'worldstat-ergonomics' ),
+					'analysisTitle' => __( 'Аналитика кластеризации', 'worldstat-ergonomics' ),
+					'featuresLabel'   => __( 'Признаки', 'worldstat-ergonomics' ),
+					'noInsights'      => __( 'Недостаточно данных для выводов.', 'worldstat-ergonomics' ),
+					'referenceNote'   => __( 'Справочно: не влияет на индекс E и классификацию на сайте.', 'worldstat-ergonomics' ),
 				],
 			]
 		);

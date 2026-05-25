@@ -42,6 +42,10 @@ class WSErgo_Renderer {
 		WSErgo_Country_Renderer::render_country_tab( $country_code );
 	}
 
+	public static function render_country_compare_tab( string $country_code ): void {
+		WSErgo_Country_Renderer::render_country_compare_tab( $country_code );
+	}
+
 	public static function ajax_load_country_city_explorer(): void {
 		WSErgo_Country_Renderer::ajax_load_country_city_explorer();
 	}

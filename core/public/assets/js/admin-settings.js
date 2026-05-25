@@ -53,6 +53,64 @@ jQuery( function ( $ ) {
 		var $form = $root.find( 'form.wsergo-settings-form' ).first();
 		$form.find( '.wsergo-tab-panel' ).hide();
 		$form.find( '#' + id ).show();
+		if ( id === 'tab-data' ) {
+			setTimeout( function () {
+				$( document ).trigger( 'wsergo-kmeans-layout-resize' );
+			}, 80 );
+		}
+		if ( id === 'tab-formula' ) {
+			setTimeout( wsergoRefreshMacroReferenceExamples, 80 );
+		}
+	}
+
+	function wsergoRefreshMacroReferenceExamples() {
+		var $panel = $( '#tab-formula' );
+		if ( ! $panel.length || ! $panel.is( ':visible' ) ) {
+			return;
+		}
+		var countryId = parseInt( $( '#wsergo_macro_reference_country' ).val(), 10 ) || 0;
+		var year = parseInt( $( '#wsergo_macro_reference_year' ).val(), 10 ) || 0;
+		var nonce = cfg.adminNonce || '';
+		if ( ! countryId || ! nonce || typeof ajaxurl === 'undefined' ) {
+			return;
+		}
+		$panel.find( '.wsergo-macro-ex-value' ).text( '…' );
+		$.post( ajaxurl, {
+			action: 'wsergo_macro_reference_examples',
+			nonce: nonce,
+			country_id: countryId,
+			year: year,
+		} )
+			.done( function ( res ) {
+				if ( ! res || ! res.success || ! res.data ) {
+					return;
+				}
+				var vals = res.data.values || {};
+				$panel.find( '[data-wsergo-macro-ex-signal]' ).each( function () {
+					var sig = $( this ).attr( 'data-wsergo-macro-ex-signal' ) || '';
+					$( this )
+						.find( '.wsergo-macro-ex-value' )
+						.text( vals[ sig ] !== undefined ? vals[ sig ] : '—' );
+				} );
+				var $note = $( '#wsergo-macro-ref-example-note' );
+				var $text = $note.find( '.wsergo-macro-ref-example-note__text' );
+				if ( $note.length && $text.length ) {
+					$note.show();
+					if ( res.data.note ) {
+						$text.text(
+							res.data.note +
+								' — значения из загруженных макро-CSV (сырой ряд, опорный год).'
+						);
+					} else if ( ! res.data.has_row ) {
+						$text.text(
+							'Для выбранной эталонной страны нет строки сырых признаков в кэше расчёта: проверьте код ISO2 в карточке страны и наличие строк в CSV за опорный год.'
+						);
+					}
+				}
+			} )
+			.fail( function () {
+				$panel.find( '.wsergo-macro-ex-value' ).text( '—' );
+			} );
 	}
 
 	function wsergoActivateCityInnerTab( id ) {
@@ -210,6 +268,16 @@ jQuery( function ( $ ) {
 
 	wsergoApplyHash();
 	$( window ).on( 'hashchange', wsergoApplyHash );
+
+	$( document ).on(
+		'change',
+		'#wsergo_macro_reference_year, #wsergo_macro_reference_country',
+		function () {
+			if ( $( '#tab-formula' ).is( ':visible' ) ) {
+				wsergoRefreshMacroReferenceExamples();
+			}
+		}
+	);
 
 	$( '#wsergo-test-formula-btn' ).on( 'click', function () {
 		var formula = $( '#wsergo_test_formula_inline' ).length

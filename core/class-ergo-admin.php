@@ -1207,6 +1207,7 @@ class WSErgo_Admin {
 			[
 				'macroAxisOpt' => WSErgo_Settings::OPTION_MACRO_AXIS_TERMS,
 				'formulaNonce' => wp_create_nonce( 'wsergo_settings_ajax' ),
+				'adminNonce'   => wp_create_nonce( 'wsergo_admin' ),
 			]
 		);
 		wp_enqueue_script( 'jquery' );

@@ -227,7 +227,7 @@ $wsergo_scope_style = ! empty( $wsergo_scope_hidden ) ? ' style="display:none"' 
 					</table>
 					<hr />
 					<h3><?php esc_html_e( 'Признаки для k-means (макро)', 'worldstat-ergonomics' ); ?></h3>
-					<p class="description"><?php esc_html_e( 'Те же параметры, что в матрице критериев выше (столбцы CSV и пользовательские). Отметьте не меньше двух признаков для вектора кластеризации и нормализации внутри кластеров. «Автоподбор» подбирает признаки и k так, чтобы кластеры были различимы на карте/графике (силуэт, без одного «мешка» из почти всех стран); в отчёте — силуэт и равномерность.', 'worldstat-ergonomics' ); ?></p>
+					<p class="description"><?php esc_html_e( 'Те же параметры, что в матрице критериев выше. Отметьте не меньше двух признаков для k-means. Кластеризация не участвует в расчёте индекса E, регрессии и классификации на сайте — только в этом блоке и в превью ниже.', 'worldstat-ergonomics' ); ?></p>
 					<p style="margin:.75em 0;">
 						<button type="button" class="button button-primary wsergo-auto-tune-clusters" data-scope="country"><?php esc_html_e( 'Автоподбор признаков и k', 'worldstat-ergonomics' ); ?></button>
 						<button type="button" class="button wsergo-auto-tune-clusters-save" data-scope="country"><?php esc_html_e( 'Автоподбор и сохранить', 'worldstat-ergonomics' ); ?></button>
@@ -235,7 +235,7 @@ $wsergo_scope_style = ! empty( $wsergo_scope_hidden ) ? ' style="display:none"' 
 					</p>
 					<div class="wsergo-cluster-kmeans-layout">
 						<div class="wsergo-cluster-kmeans-features">
-							<div id="wsergo-cluster-features-country" class="wsergo-cluster-features-host" data-scope="country" data-wsergo-features-inline="1" style="max-height:320px;overflow:auto;border:1px solid #c3c4c7;padding:10px;background:#fff;">
+							<div id="wsergo-cluster-features-country" class="wsergo-cluster-features-host wsergo-cluster-features-host--sync-height" data-scope="country" data-wsergo-features-inline="1">
 								<?php
 								if ( function_exists( 'wsergo_render_cluster_features_checkboxes' ) ) {
 									wsergo_render_cluster_features_checkboxes(
@@ -256,6 +256,11 @@ $wsergo_scope_style = ! empty( $wsergo_scope_hidden ) ? ' style="display:none"' 
 							?>
 						</div>
 					</div>
+					<?php
+					if ( function_exists( 'wsergo_render_cluster_kmeans_bottom_row' ) ) {
+						wsergo_render_cluster_kmeans_bottom_row( 'country' );
+					}
+					?>
 					<div id="wsergo-cluster-tune-report-country" class="wsergo-cluster-tune-report" style="display:none;margin-top:10px;padding:10px;border:1px solid #c3c4c7;background:#fff;max-height:180px;overflow:auto;"></div>
 					<table class="form-table" role="presentation">
 						<tr>
@@ -298,7 +303,7 @@ $wsergo_scope_style = ! empty( $wsergo_scope_hidden ) ? ' style="display:none"' 
 							<th scope="row"><label for="wsergo_macro_k_clusters"><?php esc_html_e( 'Число кластеров k-means (макро)', 'worldstat-ergonomics' ); ?></label></th>
 							<td>
 								<input type="number" id="wsergo_macro_k_clusters" name="<?php echo esc_attr( WSErgo_Settings::OPTION_MACRO_K_CLUSTERS ); ?>" value="<?php echo esc_attr( (string) $macro_k ); ?>" class="small-text" min="2" max="12" step="1" />
-								<p class="description"><?php esc_html_e( 'Нормализация min–max выполняется внутри кластера стран.', 'worldstat-ergonomics' ); ?></p>
+								<p class="description"><?php esc_html_e( 'Число кластеров для справочного разбиения и превью (не для индекса E).', 'worldstat-ergonomics' ); ?></p>
 							</td>
 						</tr>
 						<tr>
@@ -433,13 +438,20 @@ $wsergo_scope_style = ! empty( $wsergo_scope_hidden ) ? ' style="display:none"' 
 						<?php esc_html_e( 'Пока на «Данные» ни одна галочка не стоит, для всех критериев действует встроенная методика. Как только вы отметите параметры у критерия и сохраните настройки, они появятся здесь; состав менять нельзя — только веса.', 'worldstat-ergonomics' ); ?>
 						<a href="#tab-data" class="wsergo-tab-deep-link"><?php esc_html_e( 'К матрице отбора', 'worldstat-ergonomics' ); ?></a>
 					</p>
-					<?php if ( $ref_macro_example_note !== '' ) : ?>
-						<p class="description"><strong><?php esc_html_e( 'Пример данных', 'worldstat-ergonomics' ); ?>:</strong> <?php echo esc_html( $ref_macro_example_note ); ?> — <?php esc_html_e( 'значения из загруженных макро-CSV (сырой ряд, опорный год).', 'worldstat-ergonomics' ); ?></p>
-					<?php elseif ( $macro_ref_country_id > 0 ) : ?>
-						<p class="description"><?php esc_html_e( 'Для выбранной эталонной страны нет строки сырых признаков в кэше расчёта: проверьте код ISO2 в карточке страны и наличие строк в CSV за опорный год.', 'worldstat-ergonomics' ); ?></p>
-					<?php else : ?>
-						<p class="description"><?php esc_html_e( 'Чтобы заполнить столбец «Пример данных», выберите эталонную страну на вкладке «Данные» и сохраните настройки.', 'worldstat-ergonomics' ); ?></p>
-					<?php endif; ?>
+					<p id="wsergo-macro-ref-example-note" class="description"<?php echo ( $ref_macro_example_note === '' && $macro_ref_country_id <= 0 ) ? ' style="display:none"' : ''; ?>>
+						<strong><?php esc_html_e( 'Пример данных', 'worldstat-ergonomics' ); ?>:</strong>
+						<span class="wsergo-macro-ref-example-note__text"><?php
+						if ( $ref_macro_example_note !== '' ) {
+							echo esc_html( $ref_macro_example_note );
+							echo ' — ';
+							esc_html_e( 'значения из загруженных макро-CSV (сырой ряд, опорный год).', 'worldstat-ergonomics' );
+						} elseif ( $macro_ref_country_id > 0 ) {
+							esc_html_e( 'Для выбранной эталонной страны нет строки сырых признаков в кэше расчёта: проверьте код ISO2 в карточке страны и наличие строк в CSV за опорный год.', 'worldstat-ergonomics' );
+						} else {
+							esc_html_e( 'Чтобы заполнить столбец «Пример данных», выберите эталонную страну на вкладке «Данные» и сохраните настройки.', 'worldstat-ergonomics' );
+						}
+						?></span>
+					</p>
 						<?php
 						$criteria_fold_i = 0;
 						foreach ( $macro_axes_six as $ax_key ) :
@@ -498,7 +510,7 @@ $wsergo_scope_style = ! empty( $wsergo_scope_hidden ) ? ' style="display:none"' 
 											<td class="col-macro-sig"><?php echo esc_html( $rlab ); ?><br /><code class="description"><?php echo esc_html( $rsig ); ?></code></td>
 											<td class="col-macro-w"><?php echo esc_html( sprintf( '%.4f', isset( $rowt['weight'] ) ? (float) $rowt['weight'] : 0.0 ) ); ?></td>
 											<td class="col-macro-inv"><?php echo ! empty( $rowt['invert'] ) ? esc_html__( 'да', 'worldstat-ergonomics' ) : esc_html__( 'нет', 'worldstat-ergonomics' ); ?></td>
-											<td class="col-macro-ex"><code class="description"><?php echo esc_html( WSErgo_Country_Admin::format_macro_signal_example_display( $ref_macro_raw_row, $rsig ) ); ?></code></td>
+											<td class="col-macro-ex" data-wsergo-macro-ex-signal="<?php echo esc_attr( $rsig ); ?>"><code class="description wsergo-macro-ex-value"><?php echo esc_html( WSErgo_Country_Admin::format_macro_signal_example_display( $ref_macro_raw_row, $rsig ) ); ?></code></td>
 										</tr>
 										<?php endforeach; ?>
 									</tbody>
@@ -551,7 +563,7 @@ $wsergo_scope_style = ! empty( $wsergo_scope_hidden ) ? ' style="display:none"' 
 												<input type="hidden" name="<?php echo esc_attr( $inv_name ); ?>" value="0" />
 												<label><input type="checkbox" name="<?php echo esc_attr( $inv_name ); ?>" value="1" <?php checked( $inv_checked ); ?> /> <?php esc_html_e( '1−x', 'worldstat-ergonomics' ); ?></label>
 											</td>
-											<td class="col-macro-ex"><code class="description"><?php echo esc_html( WSErgo_Country_Admin::format_macro_signal_example_display( $ref_macro_raw_row, $psig ) ); ?></code></td>
+											<td class="col-macro-ex" data-wsergo-macro-ex-signal="<?php echo esc_attr( $psig ); ?>"><code class="description wsergo-macro-ex-value"><?php echo esc_html( WSErgo_Country_Admin::format_macro_signal_example_display( $ref_macro_raw_row, $psig ) ); ?></code></td>
 										</tr>
 										<?php endforeach; ?>
 									</tbody>

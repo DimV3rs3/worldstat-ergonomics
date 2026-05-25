@@ -40,6 +40,90 @@ class WSErgo_Country_Renderer {
 			$deps_country,
 			class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $css_rel ) : WSERGO_VERSION
 		);
+		if ( class_exists( 'WSErgo_Settings' ) && WSErgo_Settings::get_country_index_source() === 'macro_datasets' && class_exists( 'WSErgo_Country_Explorer' ) ) {
+			$ref_post = (int) get_queried_object_id();
+			WSErgo_Country_Explorer::enqueue_assets( $ref_post );
+		}
+	}
+
+	/**
+	 * Вкладка «Сравнение»: регрессия и классификация между странами.
+	 */
+	public static function render_country_compare_tab( string $country_code ): void {
+		if ( ! class_exists( 'WSErgo_Country_Macro_Calculator' ) || ! class_exists( 'WSErgo_Settings' ) ) {
+			echo '<p class="wsp-muted">' . esc_html__( 'Сравнение стран доступно при расчёте индекса из CSV платформы.', 'worldstat-ergonomics' ) . '</p>';
+			return;
+		}
+		if ( WSErgo_Settings::get_country_index_source() !== 'macro_datasets' ) {
+			echo '<p class="wsp-muted">' . esc_html__( 'Включите источник индекса «данные CSV платформы» в настройках эргономичности.', 'worldstat-ergonomics' ) . '</p>';
+			return;
+		}
+		if ( ! class_exists( 'WSErgo_Country_Explorer' ) ) {
+			return;
+		}
+		WSErgo_Country_Explorer::render_block( strtoupper( sanitize_text_field( $country_code ) ) );
+	}
+
+	/**
+	 * Ссылка на вкладку сравнения с вкладки «Эргономичность».
+	 */
+	private static function render_compare_tab_link( string $iso2 ): void {
+		$hash_url = '#compare';
+		if ( class_exists( 'WSCities_CPT' ) && method_exists( 'WSCities_CPT', 'get_country_tab_url' ) ) {
+			$permalink = WSCities_CPT::get_country_tab_url( $iso2, 'compare' );
+			if ( $permalink ) {
+				$hash_url = $permalink;
+			}
+		}
+		echo '<p class="wsergo-compare-tab-link" style="margin:1rem 0;">';
+		printf(
+			'<button type="button" class="wsp-btn wsp-btn-outline wsp-btn-sm" data-wsp-country-tab="compare">%s</button>',
+			esc_html__( 'Открыть вкладку «Сравнение»', 'worldstat-ergonomics' )
+		);
+		echo ' <span class="wsp-muted" style="font-size:13px;">';
+		esc_html_e( '(в меню вкладок страны — «Сравнение»)', 'worldstat-ergonomics' );
+		echo '</span>';
+		echo '</p>';
+	}
+
+	/**
+	 * Краткая классификация текущей страны (всегда на вкладке «Эргономичность»).
+	 */
+	private static function render_country_classification_summary( string $iso2 ): void {
+		if ( ! class_exists( 'WSErgo_Tier_Classifier' ) || ! class_exists( 'WSErgo_Settings' ) ) {
+			return;
+		}
+		if ( WSErgo_Settings::get_country_index_source() !== 'macro_datasets' ) {
+			return;
+		}
+		$tier = WSErgo_Tier_Classifier::get_tier_for_iso2( $iso2 );
+		if ( ! is_array( $tier ) || empty( $tier['label'] ) || ( $tier['label'] ?? '' ) === '—' ) {
+			echo '<p class="wsp-muted">' . esc_html__( 'Классификация по осям эргономичности: нет данных CSV для этой страны.', 'worldstat-ergonomics' ) . '</p>';
+			return;
+		}
+		$slug = sanitize_key( (string) ( $tier['slug'] ?? '' ) );
+		$labels = WSErgo_Tier_Classifier::axis_labels_ru();
+		echo '<section class="wsergo-country-classification-summary">';
+		echo '<h4 class="wsp-section-title" style="margin-top:0;">' . esc_html__( 'Классификация по уровням эргономичности', 'worldstat-ergonomics' ) . '</h4>';
+		echo '<p class="wsp-muted">' . esc_html__( 'Уровень и баллы по осям E, F, Cm, H, A, S, Ct (перцентили по всем странам). Полный рейтинг и график регрессии — на вкладке «Сравнение».', 'worldstat-ergonomics' ) . '</p>';
+		echo '<p class="wsergo-country-classification-summary__tier">';
+		echo '<span class="wsergo-tier-badge wsergo-tier-badge--' . esc_attr( $slug ) . '">' . esc_html( (string) $tier['label'] ) . '</span>';
+		if ( isset( $tier['composite'] ) ) {
+			echo ' <span class="wsp-muted">' . esc_html__( 'Сводный балл', 'worldstat-ergonomics' ) . ': <strong>' . esc_html( (string) $tier['composite'] ) . '</strong></span>';
+		}
+		echo '</p>';
+		if ( ! empty( $tier['axes'] ) && is_array( $tier['axes'] ) ) {
+			echo '<div class="wsp-table-wrap wsergo-country-classification-summary__table">';
+			echo '<table class="wsp-table"><thead><tr><th>' . esc_html__( 'Ось', 'worldstat-ergonomics' ) . '</th><th>' . esc_html__( 'Балл 0–100', 'worldstat-ergonomics' ) . '</th></tr></thead><tbody>';
+			foreach ( WSErgo_Tier_Classifier::SCORE_KEYS as $k ) {
+				if ( ! isset( $tier['axes'][ $k ] ) ) {
+					continue;
+				}
+				echo '<tr><td>' . esc_html( (string) ( $labels[ $k ] ?? $k ) ) . '</td><td>' . esc_html( (string) $tier['axes'][ $k ] ) . '</td></tr>';
+			}
+			echo '</tbody></table></div>';
+		}
+		echo '</section>';
 	}
 
 	/**
@@ -58,6 +142,18 @@ class WSErgo_Country_Renderer {
 		if ( is_array( $ergo_tier ) && ! empty( $ergo_tier['label'] ) && ( $ergo_tier['label'] ?? '' ) !== '—' ) {
 			$item['badge']      = (string) $ergo_tier['label'];
 			$item['badge_slug'] = sanitize_key( (string) ( $ergo_tier['slug'] ?? '' ) );
+			if ( ! empty( $ergo_tier['axes'] ) && is_array( $ergo_tier['axes'] ) && class_exists( 'WSErgo_Tier_Classifier' ) ) {
+				$parts = array();
+				$labels = WSErgo_Tier_Classifier::axis_labels_ru();
+				foreach ( WSErgo_Tier_Classifier::SCORE_KEYS as $k ) {
+					if ( isset( $ergo_tier['axes'][ $k ] ) ) {
+						$parts[] = ( $labels[ $k ] ?? $k ) . ': ' . $ergo_tier['axes'][ $k ];
+					}
+				}
+				if ( ! empty( $parts ) ) {
+					$item['badge_title'] = implode( '; ', $parts );
+				}
+			}
 		}
 
 		return $item;
@@ -139,6 +235,8 @@ class WSErgo_Country_Renderer {
 					if ( is_array( $macro_country_detail ) ) {
 						self::render_country_macro_ergo_panel( $macro_country_detail, 'country' );
 						self::render_macro_recommendations_panel( $iso2, 'country' );
+						self::render_country_classification_summary( $iso2 );
+						self::render_compare_tab_link( $iso2 );
 					}
 					$explain_country = sprintf(
 						/* translators: 1: data source label, 2: methodology version */
@@ -1415,8 +1513,8 @@ class WSErgo_Country_Renderer {
 				</p>
 				<ol style="margin:0 0 12px;padding-left:1.25rem;">
 					<li><?php esc_html_e( 'Стандартизация признаков по столбцам: вычитание среднего, деление на σ (при σ≈0 подставляется 1). Число стран в выборке — из текущих загруженных CSV.', 'worldstat-ergonomics' ); ?></li>
-					<li><?php echo esc_html( sprintf( /* translators: %d: number of clusters */ __( 'Кластеризация k-means по вектору из %d признаков (pop_density, urban_share_01, transport_dens, forest_cover_01, renewable_energy, life_exp, pm25, gdp_per_energy).', 'worldstat-ergonomics' ), $k ) ); ?></li>
-					<li><?php esc_html_e( 'Для показателей из списка нормализации внутри кластера: min–max по странам кластера в сырых значениях → величина в диапазоне 0…1 (при равенстве min и max подставляется 0,5).', 'worldstat-ergonomics' ); ?></li>
+					<li><?php esc_html_e( 'Нормализация показателей для осей E, регрессии и классификации: глобальный min–max по всем странам выборки (0…1), без деления на кластеры k-means.', 'worldstat-ergonomics' ); ?></li>
+					<li><?php esc_html_e( 'k-means (настройки ниже в админке) используется только для справочного разбиения стран и превью на карте; на индекс E и уровни эргономичности не влияет.', 'worldstat-ergonomics' ); ?></li>
 					<li><?php esc_html_e( 'Пропуски (нечисловые или бесконечные слагаемые) перед кластеризацией заполняются медианой признака по всей выборке; при расчёте каждой оси F, Cm, H, A, S, Ct взвешенное среднее пересчитывается только по конечным слагаемым (веса нормируются заново).', 'worldstat-ergonomics' ); ?></li>
 				</ol>
 				<p style="margin:0 0 8px;"><strong><?php esc_html_e( 'Шесть осей (0…1), затем умножение на 100 для отображения', 'worldstat-ergonomics' ); ?></strong></p>

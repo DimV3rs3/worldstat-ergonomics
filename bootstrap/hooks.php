@@ -85,6 +85,43 @@ add_action(
 			]
 		);
 
+		WorldStat_Extensions::add_country_tab(
+			'ergonomics',
+			[
+				'id'       => 'compare',
+				'title'    => 'Сравнение',
+				'icon'     => 'dashicons-chart-line',
+				'callback' => [ 'WSErgo_Renderer', 'render_country_compare_tab' ],
+				'priority' => 36,
+			]
+		);
+
+		add_filter(
+			'worldstat_country_tabs',
+			static function ( array $tabs, string $iso2 ): array {
+				unset( $iso2 );
+				$has_compare = false;
+				foreach ( $tabs as $t ) {
+					if ( is_array( $t ) && ( $t['id'] ?? '' ) === 'compare' ) {
+						$has_compare = true;
+						break;
+					}
+				}
+				if ( ! $has_compare ) {
+					$tabs[] = [
+						'id'       => 'compare',
+						'title'    => __( 'Сравнение', 'worldstat-ergonomics' ),
+						'icon'     => 'dashicons-chart-line',
+						'priority' => 36,
+						'is_core'  => false,
+					];
+				}
+				return $tabs;
+			},
+			10,
+			2
+		);
+
 		WorldStat_Extensions::add_map_layer(
 			'ergonomics',
 			[

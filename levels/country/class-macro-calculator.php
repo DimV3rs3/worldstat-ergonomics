@@ -1,7 +1,8 @@
 <?php
 /**
  * Индекс эргономичности страны по макроданным (CSV World Statistics Platform).
- * Страновой индекс по макроданным платформы: k-means, нормализация внутри кластеров, шесть измерений и итог E.
+ * Страновой индекс по макроданным платформы: глобальная min–max нормализация для осей E и регрессии/классификации;
+ * k-means — отдельно (диагностика и админ-превью), не влияет на индексы.
  *
  * @package WorldStatErgonomics
  */
@@ -22,10 +23,10 @@ class WSErgo_Country_Macro_Calculator {
 	private const TRANSIENT_KEY_CITY = 'wsergo_macro_city_scores_bundle_v1';
 
 	/** Инкремент при изменении логики расчёта — сбрасывает устаревший transient без смены CSV. */
-	private const SCORE_BUNDLE_LOGIC = 23;
+	private const SCORE_BUNDLE_LOGIC = 24;
 
 	/** Версия логики city-bundle (отдельно от странового свода). */
-	private const CITY_SCORE_BUNDLE_LOGIC = 2;
+	private const CITY_SCORE_BUNDLE_LOGIC = 3;
 
 	/** @var array<string, mixed>|null */
 	private static ?array $runtime_city_bundle = null;
@@ -956,6 +957,13 @@ class WSErgo_Country_Macro_Calculator {
 	 *
 	 * @return array<string, array{iso2:string,name:string}>
 	 */
+	/**
+	 * Публичная обёртка для классификатора и UI.
+	 */
+	public static function iso2_to_iso3_public( string $iso2 ): string {
+		return self::iso2_to_iso3( strtoupper( sanitize_text_field( $iso2 ) ) );
+	}
+
 	public static function iso3_country_meta_map(): array {
 		if ( self::$iso3_country_meta_cache !== null ) {
 			return self::$iso3_country_meta_cache;
@@ -988,6 +996,254 @@ class WSErgo_Country_Macro_Calculator {
 		}
 		self::$iso3_country_meta_cache = $out;
 		return $out;
+	}
+
+	/**
+	 * ISO3 по записи страны в CPT (ISO2 или meta wsp_iso_alpha3).
+	 */
+	public static function iso3_for_country_post_id( int $post_id ): string {
+		if ( $post_id <= 0 ) {
+			return '';
+		}
+		$iso2 = strtoupper( trim( (string) get_post_meta( $post_id, 'wsp_iso_alpha2', true ) ) );
+		$iso3 = '';
+		if ( strlen( $iso2 ) === 2 ) {
+			$iso3 = self::iso2_to_iso3( $iso2 );
+		}
+		if ( strlen( $iso3 ) !== 3 ) {
+			$iso3 = strtoupper( trim( (string) get_post_meta( $post_id, 'wsp_iso_alpha3', true ) ) );
+		}
+		return ( strlen( $iso3 ) === 3 && ctype_alpha( $iso3 ) ) ? $iso3 : '';
+	}
+
+	/**
+	 * Сырой ряд признаков страны за опорный год (для админки «Формула» → «Пример данных»).
+	 *
+	 * @return array<string, float>|null
+	 */
+	public static function raw_row_for_country_post_id( int $post_id, ?int $year = null ): ?array {
+		$iso3 = self::iso3_for_country_post_id( $post_id );
+		if ( $iso3 === '' ) {
+			return null;
+		}
+		if ( $year === null ) {
+			$year = class_exists( 'WSErgo_Settings' ) ? WSErgo_Settings::get_macro_reference_year() : 2022;
+		}
+		$year = max( 1960, min( (int) gmdate( 'Y' ) + 1, (int) $year ) );
+
+		$raws = array();
+		if ( class_exists( 'WSErgo_Settings' ) && $year === WSErgo_Settings::get_macro_reference_year() ) {
+			$bundle = self::get_full_bundle();
+			$raws   = isset( $bundle['raw_rows'] ) && is_array( $bundle['raw_rows'] ) ? $bundle['raw_rows'] : array();
+		} else {
+			$full = self::compute_full_bundle( $year );
+			$raws = isset( $full['raw_rows'] ) && is_array( $full['raw_rows'] ) ? $full['raw_rows'] : array();
+		}
+
+		return isset( $raws[ $iso3 ] ) && is_array( $raws[ $iso3 ] ) ? $raws[ $iso3 ] : null;
+	}
+
+	/**
+	 * Русские подписи агрегатов World Bank / регионов в CSV (не страны ISO).
+	 *
+	 * @return array<string, string>
+	 */
+	public static function wb_aggregate_labels_ru(): array {
+		return array(
+			'AFE' => __( 'Восточная и южная Африка', 'worldstat-ergonomics' ),
+			'AFW' => __( 'Западная и центральная Африка', 'worldstat-ergonomics' ),
+			'ARB' => __( 'Арабский мир', 'worldstat-ergonomics' ),
+			'CEB' => __( 'Центральная Европа и Балтия', 'worldstat-ergonomics' ),
+			'CHI' => __( 'Нормандские острова', 'worldstat-ergonomics' ),
+			'CSS' => __( 'Малые государства Карибского бассейна', 'worldstat-ergonomics' ),
+			'EAP' => __( 'Восточная Азия и Тихоокеанский регион (без стран с высоким доходом)', 'worldstat-ergonomics' ),
+			'EAR' => __( 'Ранняя демографическая дивиденда', 'worldstat-ergonomics' ),
+			'EAS' => __( 'Восточная Азия и Тихоокеанский регион', 'worldstat-ergonomics' ),
+			'ECA' => __( 'Европа и Центральная Азия (без стран с высоким доходом)', 'worldstat-ergonomics' ),
+			'ECS' => __( 'Европа и Центральная Азия', 'worldstat-ergonomics' ),
+			'EMU' => __( 'Еврозона', 'worldstat-ergonomics' ),
+			'EUU' => __( 'Европейский союз', 'worldstat-ergonomics' ),
+			'FCS' => __( 'Хрупкие и конфликтные ситуации', 'worldstat-ergonomics' ),
+			'HIC' => __( 'Страны с высоким доходом', 'worldstat-ergonomics' ),
+			'HKG' => __( 'Гонконг', 'worldstat-ergonomics' ),
+			'HPC' => __( 'Страны с высокой долговой нагрузкой (ИППП)', 'worldstat-ergonomics' ),
+			'IBD' => __( 'МБР (только)', 'worldstat-ergonomics' ),
+			'IBT' => __( 'МБР и ММА', 'worldstat-ergonomics' ),
+			'IDA' => __( 'ММА (всего)', 'worldstat-ergonomics' ),
+			'IDB' => __( 'ММА (смешанные страны)', 'worldstat-ergonomics' ),
+			'IDX' => __( 'ММА (только)', 'worldstat-ergonomics' ),
+			'INX' => __( 'Не классифицировано', 'worldstat-ergonomics' ),
+			'LAC' => __( 'Латинская Америка и Карибы (без стран с высоким доходом)', 'worldstat-ergonomics' ),
+			'LCN' => __( 'Латинская Америка и Карибы', 'worldstat-ergonomics' ),
+			'LDC' => __( 'Наименее развитые страны (классификация ООН)', 'worldstat-ergonomics' ),
+			'LIC' => __( 'Страны с низким доходом', 'worldstat-ergonomics' ),
+			'LMC' => __( 'Страны с доходом ниже среднего', 'worldstat-ergonomics' ),
+			'LMY' => __( 'Страны с низким и средним доходом', 'worldstat-ergonomics' ),
+			'LTE' => __( 'Поздняя демографическая дивиденда', 'worldstat-ergonomics' ),
+			'MAC' => __( 'Макао', 'worldstat-ergonomics' ),
+			'MIC' => __( 'Страны со средним доходом', 'worldstat-ergonomics' ),
+			'MNA' => __( 'Ближний Восток и Северная Африка (без стран с высоким доходом)', 'worldstat-ergonomics' ),
+			'NAC' => __( 'Северная Америка', 'worldstat-ergonomics' ),
+			'OED' => __( 'ОЭСР', 'worldstat-ergonomics' ),
+			'OSS' => __( 'Прочие малые государства', 'worldstat-ergonomics' ),
+			'PRE' => __( 'Преддемографическая дивиденда', 'worldstat-ergonomics' ),
+			'PSE' => __( 'Палестина', 'worldstat-ergonomics' ),
+			'PSS' => __( 'Тихоокеанские малые государства', 'worldstat-ergonomics' ),
+			'PST' => __( 'Постдемографическая дивиденда', 'worldstat-ergonomics' ),
+			'SAS' => __( 'Южная Азия', 'worldstat-ergonomics' ),
+			'SSA' => __( 'Тропическая Африка южнее Сахары (без стран с высоким доходом)', 'worldstat-ergonomics' ),
+			'SSF' => __( 'Тропическая Африка южнее Сахары', 'worldstat-ergonomics' ),
+			'SST' => __( 'Малые государства', 'worldstat-ergonomics' ),
+			'TEA' => __( 'Восточная Азия и Тихоокеанский регион (МБР и ММА)', 'worldstat-ergonomics' ),
+			'TEC' => __( 'Европа и Центральная Азия (МБР и ММА)', 'worldstat-ergonomics' ),
+			'TLA' => __( 'Латинская Америка и Карибы (МБР и ММА)', 'worldstat-ergonomics' ),
+			'TMN' => __( 'Ближний Восток и Северная Африка (МБР и ММА)', 'worldstat-ergonomics' ),
+			'TSA' => __( 'Южная Азия (МБР и ММА)', 'worldstat-ergonomics' ),
+			'TSS' => __( 'Тропическая Африка южнее Сахары (МБР и ММА)', 'worldstat-ergonomics' ),
+			'TWN' => __( 'Тайвань', 'worldstat-ergonomics' ),
+			'UMC' => __( 'Страны с доходом выше среднего', 'worldstat-ergonomics' ),
+			'WLD' => __( 'Мир', 'worldstat-ergonomics' ),
+			'XKX' => __( 'Косово', 'worldstat-ergonomics' ),
+		);
+	}
+
+	/**
+	 * Метаданные строки CSV по ISO3: страна (iso2 + русское имя) или агрегат.
+	 *
+	 * @return array{iso2:string,name:string,iso3:string,is_aggregate:bool}
+	 */
+	public static function country_meta_for_iso3( string $iso3 ): array {
+		$iso3 = strtoupper( sanitize_key( $iso3 ) );
+		if ( strlen( $iso3 ) !== 3 || ! ctype_alpha( $iso3 ) ) {
+			return array(
+				'iso2'         => '',
+				'name'         => $iso3,
+				'iso3'         => $iso3,
+				'is_aggregate' => true,
+			);
+		}
+
+		$map = self::iso3_country_meta_map();
+		if ( isset( $map[ $iso3 ] ) ) {
+			return array(
+				'iso2'         => (string) $map[ $iso3 ]['iso2'],
+				'name'         => (string) $map[ $iso3 ]['name'],
+				'iso3'         => $iso3,
+				'is_aggregate' => false,
+			);
+		}
+
+		$agg = self::wb_aggregate_labels_ru();
+		if ( isset( $agg[ $iso3 ] ) ) {
+			return array(
+				'iso2'         => '',
+				'name'         => (string) $agg[ $iso3 ],
+				'iso3'         => $iso3,
+				'is_aggregate' => true,
+			);
+		}
+
+		$from_cpt = self::country_meta_from_cpt_iso3( $iso3 );
+		if ( is_array( $from_cpt ) ) {
+			return $from_cpt;
+		}
+
+		$resolved = self::resolve_iso3_display_name_ru( $iso3 );
+		if ( $resolved !== '' && $resolved !== $iso3 ) {
+			return array(
+				'iso2'         => '',
+				'name'         => $resolved,
+				'iso3'         => $iso3,
+				'is_aggregate' => true,
+			);
+		}
+
+		return array(
+			'iso2'         => '',
+			'name'         => $iso3,
+			'iso3'         => $iso3,
+			'is_aggregate' => true,
+		);
+	}
+
+	/**
+	 * Русское имя по ISO3, если код не попал в каталог стран и агрегатов WB.
+	 */
+	private static function resolve_iso3_display_name_ru( string $iso3 ): string {
+		$iso3 = strtoupper( $iso3 );
+		if ( strlen( $iso3 ) !== 3 ) {
+			return '';
+		}
+		$path = defined( 'WSP_DATA_DIR' ) ? (string) WSP_DATA_DIR . 'countries.json' : '';
+		if ( ( $path === '' || ! is_readable( $path ) ) && defined( 'WP_PLUGIN_DIR' ) ) {
+			$path = (string) WP_PLUGIN_DIR . 'world-statistics-platform/data/countries.json';
+		}
+		if ( $path !== '' && is_readable( $path ) ) {
+			$raw = file_get_contents( $path );
+			$arr = is_string( $raw ) ? json_decode( $raw, true ) : null;
+			if ( is_array( $arr ) ) {
+				foreach ( $arr as $row ) {
+					if ( ! is_array( $row ) ) {
+						continue;
+					}
+					if ( strtoupper( (string) ( $row['iso3'] ?? '' ) ) !== $iso3 ) {
+						continue;
+					}
+					$name = (string) ( $row['name_ru'] ?? $row['name_en'] ?? '' );
+					if ( $name !== '' ) {
+						return $name;
+					}
+				}
+			}
+		}
+		return '';
+	}
+
+	/**
+	 * @return array{iso2:string,name:string,iso3:string,is_aggregate:bool}|null
+	 */
+	private static function country_meta_from_cpt_iso3( string $iso3 ): ?array {
+		if ( ! class_exists( 'WorldStat_Country_CPT' ) ) {
+			return null;
+		}
+		$posts = get_posts(
+			array(
+				'post_type'              => WorldStat_Country_CPT::SLUG,
+				'post_status'            => 'publish',
+				'posts_per_page'         => 1,
+				'no_found_rows'          => true,
+				'update_post_meta_cache' => false,
+				'update_post_term_cache' => false,
+				'meta_query'             => array(
+					array(
+						'key'   => 'wsp_iso_alpha3',
+						'value' => $iso3,
+					),
+				),
+				'fields'                 => 'ids',
+			)
+		);
+		if ( empty( $posts ) ) {
+			return null;
+		}
+		$post_id = (int) $posts[0];
+		$iso2  = strtoupper( (string) get_post_meta( $post_id, 'wsp_iso_alpha2', true ) );
+		$title = get_the_title( $post_id );
+		if ( strlen( $iso2 ) !== 2 ) {
+			$from_json = self::iso3_country_meta_map()[ $iso3 ] ?? null;
+			if ( is_array( $from_json ) && strlen( (string) ( $from_json['iso2'] ?? '' ) ) === 2 ) {
+				$iso2 = (string) $from_json['iso2'];
+			}
+		}
+		if ( strlen( $iso2 ) !== 2 ) {
+			return null;
+		}
+		return array(
+			'iso2'         => $iso2,
+			'name'         => $title !== '' ? (string) $title : $iso3,
+			'iso3'         => $iso3,
+			'is_aggregate' => false,
+		);
 	}
 
 	/**
@@ -1029,7 +1285,6 @@ class WSErgo_Country_Macro_Calculator {
 			return $run;
 		}
 
-		$meta_map   = self::iso3_country_meta_map();
 		$countries  = array();
 		$choropleth = array();
 		$sizes      = array_fill( 0, (int) $run['k'], 0 );
@@ -1037,10 +1292,7 @@ class WSErgo_Country_Macro_Calculator {
 		foreach ( $run['keys'] as $i => $iso3 ) {
 			$cid  = (int) ( $run['labels'][ $i ] ?? 0 );
 			$disp = $cid + 1;
-			$meta = $meta_map[ $iso3 ] ?? array(
-				'iso2' => '',
-				'name' => $iso3,
-			);
+			$meta = self::country_meta_for_iso3( (string) $iso3 );
 			$pt           = $run['scaled'][ $i ] ?? array();
 			$countries[]  = array(
 				'iso3'    => $iso3,
@@ -1071,6 +1323,67 @@ class WSErgo_Country_Macro_Calculator {
 			$feat_labels[ $f ] = self::data_label_ru( $f );
 		}
 
+		$by_cl     = array();
+		$feat_sums = array();
+		$global_sum = array_fill_keys( $features, 0.0 );
+		$global_n   = array_fill_keys( $features, 0 );
+		foreach ( $run['keys'] as $i => $iso3 ) {
+			$cid  = (int) ( $run['labels'][ $i ] ?? 0 );
+			$disp = $cid + 1;
+			$row  = isset( $rows[ $iso3 ] ) && is_array( $rows[ $iso3 ] ) ? $rows[ $iso3 ] : array();
+			if ( ! isset( $by_cl[ $disp ] ) ) {
+				$by_cl[ $disp ] = array();
+			}
+			$meta = self::country_meta_for_iso3( (string) $iso3 );
+			$by_cl[ $disp ][] = array(
+				'iso2' => (string) $meta['iso2'],
+				'iso3' => (string) $iso3,
+				'name' => (string) $meta['name'],
+			);
+			if ( ! isset( $feat_sums[ $disp ] ) ) {
+				$feat_sums[ $disp ] = array_fill_keys( $features, 0.0 );
+				$feat_sums[ $disp ]['_n'] = 0;
+			}
+			$has_vals = false;
+			foreach ( $features as $feat ) {
+				$v = isset( $row[ $feat ] ) ? (float) $row[ $feat ] : NAN;
+				if ( ! is_finite( $v ) ) {
+					continue;
+				}
+				$feat_sums[ $disp ][ $feat ] += $v;
+				$global_sum[ $feat ] += $v;
+				++$global_n[ $feat ];
+				$has_vals = true;
+			}
+			if ( $has_vals ) {
+				++$feat_sums[ $disp ]['_n'];
+			}
+		}
+		$global_mean = array();
+		foreach ( $features as $feat ) {
+			$gn = (int) ( $global_n[ $feat ] ?? 0 );
+			$global_mean[ $feat ] = $gn > 0 ? (float) $global_sum[ $feat ] / $gn : 0.0;
+		}
+		ksort( $by_cl, SORT_NUMERIC );
+		$clusters = array();
+		foreach ( $by_cl as $cl_num => $list ) {
+			usort(
+				$list,
+				static function ( $a, $b ) {
+					return strcmp( (string) ( $a['name'] ?? '' ), (string) ( $b['name'] ?? '' ) );
+				}
+			);
+			$profile = self::describe_cluster_feature_profile( $features, $feat_sums[ $cl_num ] ?? array(), $global_mean );
+			$clusters[] = array(
+				'cluster'   => (int) $cl_num,
+				'count'     => count( $list ),
+				'profile'   => (string) ( $profile['label'] ?? '' ),
+				'insight'   => (string) ( $profile['insight'] ?? '' ),
+				'countries' => $list,
+			);
+		}
+		$insights = self::build_cluster_summary_insights( $clusters, (int) $run['k'], array_values( $feat_labels ) );
+
 		return array(
 			'ok'             => true,
 			'k'              => (int) $run['k'],
@@ -1079,12 +1392,235 @@ class WSErgo_Country_Macro_Calculator {
 			'axis_x'         => $features[0],
 			'axis_y'         => $features[1] ?? $features[0],
 			'countries'      => $countries,
+			'clusters'       => $clusters,
+			'insights'       => $insights,
 			'choropleth'     => $choropleth,
 			'cluster_sizes'  => array_values( $sizes ),
 			'colors'         => array_slice( self::cluster_palette(), 0, (int) $run['k'] ),
 			'year'           => (int) ( $bundle['y'] ?? 0 ),
 			'n_countries'    => count( $countries ),
 		);
+	}
+
+	/**
+	 * Сводка кластеризации для админки (не влияет на индекс E и классификацию).
+	 *
+	 * @return array{
+	 *   ok:bool,
+	 *   k:int,
+	 *   features:list<string>,
+	 *   feature_labels:list<string>,
+	 *   clusters:list<array{cluster:int,count:int,countries:list<array{iso2:string,name:string}>}>
+	 * }
+	 */
+	public static function get_cluster_assignment_summary( string $scope = 'country' ): array {
+		$scope = ( 'city' === $scope ) ? 'city' : 'country';
+		$empty = array(
+			'ok'             => false,
+			'k'              => 0,
+			'features'       => array(),
+			'feature_labels' => array(),
+			'clusters'       => array(),
+		);
+		if ( ! class_exists( 'WSErgo_Settings' ) ) {
+			return $empty;
+		}
+		$features = ( 'city' === $scope )
+			? WSErgo_Settings::get_city_macro_cluster_features()
+			: WSErgo_Settings::get_macro_cluster_features();
+		if ( count( $features ) < 2 ) {
+			$features = self::CLUSTER_FEATURES;
+		}
+		$k = ( 'city' === $scope )
+			? WSErgo_Settings::get_city_macro_k_clusters()
+			: WSErgo_Settings::get_macro_k_clusters();
+		$k = max( 2, min( 12, $k ) );
+
+		$bundle = ( 'city' === $scope ) ? self::get_city_full_bundle() : self::get_full_bundle();
+		$rows   = isset( $bundle['raw_rows'] ) && is_array( $bundle['raw_rows'] ) ? $bundle['raw_rows'] : array();
+		if ( count( $rows ) < 2 ) {
+			return $empty;
+		}
+
+		$run = self::run_kmeans_on_rows( $rows, $features, $k );
+		if ( empty( $run['ok'] ) ) {
+			return $empty;
+		}
+
+		$by_cl      = array();
+		$feat_sums  = array();
+		$global_sum = array_fill_keys( $features, 0.0 );
+		$global_n   = array_fill_keys( $features, 0 );
+		foreach ( $run['keys'] as $i => $iso3 ) {
+			$cid  = (int) ( $run['labels'][ $i ] ?? 0 );
+			$disp = $cid + 1;
+			$meta = self::country_meta_for_iso3( (string) $iso3 );
+			if ( ! isset( $by_cl[ $disp ] ) ) {
+				$by_cl[ $disp ] = array();
+			}
+			$by_cl[ $disp ][] = array(
+				'iso2' => (string) $meta['iso2'],
+				'iso3' => (string) $iso3,
+				'name' => (string) $meta['name'],
+			);
+			$row = isset( $rows[ $iso3 ] ) && is_array( $rows[ $iso3 ] ) ? $rows[ $iso3 ] : array();
+			if ( ! isset( $feat_sums[ $disp ] ) ) {
+				$feat_sums[ $disp ] = array_fill_keys( $features, 0.0 );
+				$feat_sums[ $disp ]['_n'] = 0;
+			}
+			$has_vals = false;
+			foreach ( $features as $feat ) {
+				$v = isset( $row[ $feat ] ) ? (float) $row[ $feat ] : NAN;
+				if ( ! is_finite( $v ) ) {
+					continue;
+				}
+				$feat_sums[ $disp ][ $feat ] += $v;
+				$global_sum[ $feat ] += $v;
+				++$global_n[ $feat ];
+				$has_vals = true;
+			}
+			if ( $has_vals ) {
+				++$feat_sums[ $disp ]['_n'];
+			}
+		}
+		ksort( $by_cl, SORT_NUMERIC );
+		$global_mean = array();
+		foreach ( $features as $feat ) {
+			$gn = (int) ( $global_n[ $feat ] ?? 0 );
+			$global_mean[ $feat ] = $gn > 0 ? (float) $global_sum[ $feat ] / $gn : 0.0;
+		}
+
+		$clusters = array();
+		foreach ( $by_cl as $cl_num => $list ) {
+			usort(
+				$list,
+				static function ( $a, $b ) {
+					return strcmp( (string) ( $a['name'] ?? '' ), (string) ( $b['name'] ?? '' ) );
+				}
+			);
+			$profile = self::describe_cluster_feature_profile( $features, $feat_sums[ $cl_num ] ?? array(), $global_mean );
+			$clusters[] = array(
+				'cluster'   => (int) $cl_num,
+				'count'     => count( $list ),
+				'profile'   => (string) ( $profile['label'] ?? '' ),
+				'insight'   => (string) ( $profile['insight'] ?? '' ),
+				'countries' => $list,
+			);
+		}
+
+		$feat_labels = array();
+		foreach ( $features as $f ) {
+			$feat_labels[] = self::data_label_ru( $f );
+		}
+
+		$insights = self::build_cluster_summary_insights( $clusters, $k, $feat_labels );
+
+		return array(
+			'ok'             => true,
+			'k'              => (int) $run['k'],
+			'features'       => array_values( $features ),
+			'feature_labels' => $feat_labels,
+			'insights'       => $insights,
+			'clusters'       => $clusters,
+		);
+	}
+
+	/**
+	 * @param list<string>              $features
+	 * @param array<string, float|int>  $sums
+	 * @param array<string, float>      $global_mean
+	 * @return array{label:string,insight:string}
+	 */
+	private static function describe_cluster_feature_profile( array $features, array $sums, array $global_mean ): array {
+		$n = (int) ( $sums['_n'] ?? 0 );
+		if ( $n < 1 ) {
+			return array(
+				'label'   => __( 'Недостаточно данных', 'worldstat-ergonomics' ),
+				'insight' => '',
+			);
+		}
+		$diffs = array();
+		foreach ( $features as $feat ) {
+			$mean = (float) ( $sums[ $feat ] ?? 0 ) / $n;
+			$diffs[] = array(
+				'feat'  => $feat,
+				'label' => self::data_label_ru( $feat ),
+				'diff'  => $mean - (float) ( $global_mean[ $feat ] ?? 0 ),
+				'mean'  => $mean,
+			);
+		}
+		usort(
+			$diffs,
+			static function ( $a, $b ) {
+				return ( $b['diff'] ?? 0 ) <=> ( $a['diff'] ?? 0 );
+			}
+		);
+		$strong = $diffs[0];
+		$weak   = $diffs[ count( $diffs ) - 1 ];
+		$label  = sprintf(
+			__( 'Выше среднего: %1$s; ниже: %2$s', 'worldstat-ergonomics' ),
+			(string) ( $strong['label'] ?? '' ),
+			(string) ( $weak['label'] ?? '' )
+		);
+		$insight = sprintf(
+			__( 'Среднее по кластеру: %1$s — %2$s; %3$s — %4$s (относительно общей выборки).', 'worldstat-ergonomics' ),
+			(string) ( $strong['label'] ?? '' ),
+			number_format( (float) ( $strong['mean'] ?? 0 ), 2, ',', ' ' ),
+			(string) ( $weak['label'] ?? '' ),
+			number_format( (float) ( $weak['mean'] ?? 0 ), 2, ',', ' ' )
+		);
+		return array(
+			'label'   => $label,
+			'insight' => $insight,
+		);
+	}
+
+	/**
+	 * @param list<array{cluster:int,count:int,profile?:string,insight?:string}> $clusters
+	 * @param list<string>                                                       $feat_labels
+	 * @return list<string>
+	 */
+	private static function build_cluster_summary_insights( array $clusters, int $k, array $feat_labels ): array {
+		$insights = array();
+		if ( empty( $clusters ) ) {
+			return $insights;
+		}
+		$total = 0;
+		$max   = $clusters[0];
+		$min   = $clusters[0];
+		foreach ( $clusters as $cl ) {
+			$cnt = (int) ( $cl['count'] ?? 0 );
+			$total += $cnt;
+			if ( $cnt > (int) ( $max['count'] ?? 0 ) ) {
+				$max = $cl;
+			}
+			if ( $cnt < (int) ( $min['count'] ?? 0 ) ) {
+				$min = $cl;
+			}
+		}
+		$feat_str = implode( ', ', $feat_labels );
+		$insights[] = sprintf(
+			__( 'По признакам (%1$s) выделено %2$d кластеров, всего %3$d стран с данными.', 'worldstat-ergonomics' ),
+			$feat_str !== '' ? $feat_str : '—',
+			$k,
+			$total
+		);
+		$insights[] = sprintf(
+			__( 'Самый крупный — кластер %1$d (%2$d стран): %3$s.', 'worldstat-ergonomics' ),
+			(int) ( $max['cluster'] ?? 0 ),
+			(int) ( $max['count'] ?? 0 ),
+			(string) ( $max['profile'] ?? '' )
+		);
+		if ( (int) ( $min['cluster'] ?? 0 ) !== (int) ( $max['cluster'] ?? 0 ) ) {
+			$insights[] = sprintf(
+				__( 'Самый компактный — кластер %1$d (%2$d стран): %3$s.', 'worldstat-ergonomics' ),
+				(int) ( $min['cluster'] ?? 0 ),
+				(int) ( $min['count'] ?? 0 ),
+				(string) ( $min['profile'] ?? '' )
+			);
+		}
+		$insights[] = __( 'Кластеризация по CSV справочна и не меняет индекс E и классификацию на сайте.', 'worldstat-ergonomics' );
+		return $insights;
 	}
 
 	/**
@@ -1446,7 +1982,7 @@ class WSErgo_Country_Macro_Calculator {
 				$iso3   = $keys[ $i ];
 				$vals[] = isset( $rows[ $iso3 ][ $col ] ) ? (float) $rows[ $iso3 ][ $col ] : NAN;
 			}
-			$norm_cols[ $col ] = self::normalize_within_clusters_1d( $vals, $labels, $k );
+			$norm_cols[ $col ] = self::normalize_global_minmax_1d( $vals );
 		}
 
 		if ( isset( $norm_cols['sustainable_cities'] ) ) {
@@ -1630,7 +2166,7 @@ class WSErgo_Country_Macro_Calculator {
 				$iso3   = $keys[ $i ];
 				$vals[] = isset( $rows[ $iso3 ][ $col ] ) ? (float) $rows[ $iso3 ][ $col ] : NAN;
 			}
-			$norm_cols[ $col ] = self::normalize_within_clusters_1d( $vals, $labels, $k );
+			$norm_cols[ $col ] = self::normalize_global_minmax_1d( $vals );
 		}
 
 		if ( isset( $norm_cols['sustainable_cities'] ) ) {
@@ -1857,6 +2393,49 @@ class WSErgo_Country_Macro_Calculator {
 	}
 
 	/**
+	 * @param list<float> $values
+	 * @param list<int>   $labels
+	 * @return list<float>
+	 */
+	/**
+	 * Min–max по всей выборке стран (0…1), без кластеров — для осей E, регрессии и классификации.
+	 *
+	 * @param list<float> $values
+	 * @return list<float>
+	 */
+	private static function normalize_global_minmax_1d( array $values ): array {
+		$n = count( $values );
+		if ( $n < 1 ) {
+			return array();
+		}
+		$finite = array();
+		foreach ( $values as $i => $v ) {
+			if ( is_finite( (float) $v ) ) {
+				$finite[ $i ] = (float) $v;
+			}
+		}
+		if ( empty( $finite ) ) {
+			return array_fill( 0, $n, NAN );
+		}
+		$min = min( $finite );
+		$max = max( $finite );
+		$out = array_fill( 0, $n, NAN );
+		foreach ( $values as $i => $v ) {
+			if ( ! is_finite( (float) $v ) ) {
+				continue;
+			}
+			if ( abs( $max - $min ) < 1e-12 ) {
+				$out[ $i ] = 0.5;
+			} else {
+				$out[ $i ] = ( (float) $v - $min ) / ( $max - $min );
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * @deprecated Используется только для справки; индексы считаются через {@see normalize_global_minmax_1d()}.
+	 *
 	 * @param list<float> $values
 	 * @param list<int>   $labels
 	 * @return list<float>

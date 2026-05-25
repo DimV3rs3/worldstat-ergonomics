@@ -102,30 +102,262 @@
 		$host.find('.wsergo-cluster-viz-legend').html(html);
 	}
 
-	function renderTable($host, data) {
-		var $wrap = $host.find('.wsergo-cluster-viz-table-wrap');
-		if (!data.countries || !data.countries.length) {
-			$wrap.empty();
+	function clusterColors(data) {
+		return colorsFromData(data);
+	}
+
+	function countriesPanel(scope) {
+		return $('#wsergo-cluster-countries-' + scope);
+	}
+
+	function analysisPanel(scope) {
+		return $('#wsergo-cluster-analysis-' + scope);
+	}
+
+	function clearBottomPanels(scope, message) {
+		var msg = message || i18n('needFeatures', 'Отметьте не меньше двух признаков.');
+		countriesPanel(scope).html('<p class="wsergo-cluster-panel-empty description">' + esc(msg) + '</p>');
+		analysisPanel(scope).html('<p class="wsergo-cluster-panel-empty description">' + esc(msg) + '</p>');
+	}
+
+	function bindClusterTabs($root) {
+		if (!$root.length) {
 			return;
 		}
-		var html =
-			'<table class="widefat striped"><thead><tr><th>' +
-			esc(i18n('cluster', 'Кластер')) +
-			'</th><th>' +
-			esc(i18n('country', 'Страна')) +
-			'</th><th>ISO2</th></tr></thead><tbody>';
-		data.countries.forEach(function (row) {
-			html +=
-				'<tr><td>' +
-				esc(row.cluster) +
-				'</td><td>' +
-				esc(row.name) +
-				'</td><td><code>' +
-				esc(row.iso2 || '—') +
-				'</code></td></tr>';
+		var bound = $root.data('wsergoTabsBound');
+		if (bound) {
+			return;
+		}
+		$root.data('wsergoTabsBound', 1);
+		function showCluster(num) {
+			$root.find('.wsergo-cluster-tabs__tab').each(function () {
+				var on = $(this).attr('data-cluster') === String(num);
+				$(this).toggleClass('is-active', on).attr('aria-selected', on ? 'true' : 'false');
+			});
+			$root.find('[data-cluster-panel]').each(function () {
+				$(this).toggleClass('hidden', $(this).attr('data-cluster-panel') !== String(num));
+			});
+		}
+		$root.on('click', '.wsergo-cluster-tabs__tab', function (e) {
+			e.preventDefault();
+			showCluster($(this).attr('data-cluster'));
 		});
-		html += '</tbody></table>';
+		var first = $root.find('.wsergo-cluster-tabs__tab').first().attr('data-cluster');
+		if (first) {
+			showCluster(first);
+		}
+	}
+
+	function renderClusterTabs(scope, data) {
+		var $wrap = countriesPanel(scope);
+		if (!$wrap.length) {
+			return;
+		}
+		var clusters = data.clusters || [];
+		if (!clusters.length && data.countries && data.countries.length) {
+			var byCl = {};
+			data.countries.forEach(function (row) {
+				var n = parseInt(row.cluster, 10) || 0;
+				if (!byCl[n]) {
+					byCl[n] = [];
+				}
+				byCl[n].push({ name: row.name, iso2: row.iso2, iso3: row.iso3 });
+			});
+			clusters = Object.keys(byCl)
+				.sort(function (a, b) {
+					return parseInt(a, 10) - parseInt(b, 10);
+				})
+				.map(function (k) {
+					return {
+						cluster: parseInt(k, 10),
+						count: byCl[k].length,
+						countries: byCl[k],
+					};
+				});
+		}
+		if (!clusters.length) {
+			$wrap.html('<p class="wsergo-cluster-panel-empty description">' + esc(i18n('error', 'Нет данных')) + '</p>');
+			return;
+		}
+		var colors = clusterColors(data);
+		var html = '<div class="wsergo-cluster-tabs wsergo-cluster-tabs--fill">';
+		html += '<div class="wsergo-cluster-tabs__bar" role="tablist">';
+		clusters.forEach(function (cl, idx) {
+			var num = cl.cluster || idx + 1;
+			var cnt = cl.count || (cl.countries ? cl.countries.length : 0);
+			var col = colors[(num - 1) % colors.length] || '#2271b1';
+			html +=
+				'<button type="button" class="wsergo-cluster-tabs__tab' +
+				(idx === 0 ? ' is-active' : '') +
+				'" role="tab" aria-selected="' +
+				(idx === 0 ? 'true' : 'false') +
+				'" data-cluster="' +
+				esc(String(num)) +
+				'" style="--wsergo-tab-color:' +
+				esc(col) +
+				'"><span class="wsergo-cluster-tabs__tab-dot" aria-hidden="true"></span>' +
+				esc(i18n('cluster', 'Кластер')) +
+				' ' +
+				num +
+				' · ' +
+				cnt +
+				'</button>';
+		});
+		html += '</div>';
+		clusters.forEach(function (cl, idx) {
+			var num = cl.cluster || idx + 1;
+			var list = cl.countries || [];
+			html +=
+				'<div class="wsergo-cluster-tabs__panel' +
+				(idx === 0 ? '' : ' hidden') +
+				'" role="tabpanel" data-cluster-panel="' +
+				esc(String(num)) +
+				'">';
+			if (cl.profile) {
+				html += '<p class="wsergo-cluster-tabs__profile">' + esc(cl.profile) + '</p>';
+			}
+			if (cl.insight) {
+				html += '<p class="wsergo-cluster-tabs__insight">' + esc(cl.insight) + '</p>';
+			}
+			html += '<div class="wsergo-cluster-tabs__scroll"><ul class="wsergo-cluster-tabs__countries">';
+			list.forEach(function (c) {
+				var label = c.name || '';
+				if ((!label || label === c.iso3) && c.iso3 && cfg.countryLabels && cfg.countryLabels[c.iso3]) {
+					label = cfg.countryLabels[c.iso3];
+				}
+				html +=
+					'<li><span class="wsergo-cluster-tabs__country-name">' +
+					esc(label || c.iso3 || '') +
+					'</span>';
+				if (c.iso2) {
+					html += '<code>' + esc(c.iso2) + '</code>';
+				} else if (c.iso3) {
+					html += '<code>' + esc(c.iso3) + '</code>';
+				}
+				html += '</li>';
+			});
+			html += '</ul></div></div>';
+		});
+		html += '</div>';
 		$wrap.html(html);
+		var $tabs = $wrap.find('.wsergo-cluster-tabs');
+		$tabs.removeData('wsergoTabsBound');
+		bindClusterTabs($tabs);
+	}
+
+	function renderClusterAnalysis(scope, data) {
+		var $box = analysisPanel(scope);
+		if (!$box.length) {
+			return;
+		}
+		var lines = data.insights || [];
+		var featLabels = data.feature_labels || {};
+		var featArr = [];
+		Object.keys(featLabels).forEach(function (k) {
+			featArr.push(featLabels[k]);
+		});
+		var html = '<div class="wsergo-cluster-analysis">';
+		html += '<p class="wsergo-cluster-analysis__meta"><strong>' + esc(summaryText(data)) + '</strong></p>';
+		if (featArr.length) {
+			html +=
+				'<p class="wsergo-cluster-analysis__features"><span class="wsergo-cluster-analysis__label">' +
+				esc(i18n('featuresLabel', 'Признаки')) +
+				':</span> ' +
+				esc(featArr.join(', ')) +
+				'</p>';
+		}
+		if (lines.length) {
+			html += '<ul class="wsergo-cluster-analysis__list">';
+			lines.forEach(function (line) {
+				html += '<li>' + esc(line) + '</li>';
+			});
+			html += '</ul>';
+		} else {
+			html += '<p class="description">' + esc(i18n('noInsights', 'Недостаточно данных для выводов.')) + '</p>';
+		}
+		html += '<p class="description wsergo-cluster-analysis__note">' +
+			esc(i18n('referenceNote', 'Справочно: не влияет на индекс E и классификацию на сайте.')) +
+			'</p></div>';
+		$box.html(html);
+	}
+
+	function mapMaxBounds() {
+		if (typeof L === 'undefined' || !L.latLngBounds) {
+			return null;
+		}
+		return L.latLngBounds( L.latLng( -58, -175 ), L.latLng( 78, 175 ) );
+	}
+
+	var kmeansHeightObservers = {};
+
+	function measureKmeansVizHeight($layout, scope) {
+		var $vizCol = $layout.find('.wsergo-cluster-kmeans-viz').first();
+		if (!$vizCol.length) {
+			return 0;
+		}
+		var h = Math.ceil($vizCol[0].getBoundingClientRect().height);
+		if (h < 120) {
+			h = Math.ceil($vizCol.outerHeight() || 0);
+		}
+		if (h < 120) {
+			var $vizHost = vizHost(scope);
+			if ($vizHost.length) {
+				h = Math.ceil($vizHost.outerHeight(true) || 0);
+			}
+		}
+		return h;
+	}
+
+	function syncFeaturesHeight(scope) {
+		var $feat = featuresHost(scope);
+		if (!$feat.length || !$feat.hasClass('wsergo-cluster-features-host--sync-height')) {
+			return;
+		}
+		var $layout = $feat.closest('.wsergo-cluster-kmeans-layout');
+		if (!$layout.length) {
+			return;
+		}
+		var h = measureKmeansVizHeight($layout, scope);
+		if (h < 120) {
+			return;
+		}
+		var px = h + 'px';
+		$layout.css('--wsergo-kmeans-sync-h', px);
+		$feat.css({
+			height: px,
+			maxHeight: px,
+			minHeight: 0,
+			overflowX: 'hidden',
+			overflowY: 'auto',
+		});
+	}
+
+	function syncAllFeaturesHeights() {
+		$('.wsergo-cluster-features-host--sync-height').each(function () {
+			syncFeaturesHeight($(this).data('scope') || 'country');
+		});
+	}
+
+	function attachKmeansHeightSync(scope) {
+		var $feat = featuresHost(scope);
+		if (!$feat.length) {
+			return;
+		}
+		var $layout = $feat.closest('.wsergo-cluster-kmeans-layout');
+		var $vizCol = $layout.find('.wsergo-cluster-kmeans-viz')[0];
+		if (!$vizCol) {
+			return;
+		}
+		syncFeaturesHeight(scope);
+		if (kmeansHeightObservers[scope]) {
+			return;
+		}
+		if (typeof ResizeObserver === 'function') {
+			kmeansHeightObservers[scope] = new ResizeObserver(function () {
+				syncFeaturesHeight(scope);
+			});
+			kmeansHeightObservers[scope].observe($vizCol);
+		}
 	}
 
 	function destroyCharts($host) {
@@ -183,7 +415,7 @@
 						display: true,
 						text: i18n('distribution', 'Распределение по кластерам'),
 					},
-					legend: { position: 'bottom' },
+					legend: { display: false },
 				},
 				maintainAspectRatio: false,
 			},
@@ -222,7 +454,7 @@
 							},
 						},
 					},
-					legend: { position: 'bottom' },
+					legend: { display: false },
 				},
 				scales: {
 					x: { title: { display: true, text: axisX } },
@@ -295,21 +527,38 @@
 		var st = mapState[scope];
 
 		if (!st.map) {
-			st.map = L.map(el, {
+			var mapOpts = {
 				zoomControl: true,
 				attributionControl: false,
-				maxBoundsViscosity: 1,
-			}).setView([20, 10], 2);
-			L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
-				maxZoom: 6,
+				maxBoundsViscosity: 1.0,
+				worldCopyJump: false,
+				minZoom: 2,
+				maxZoom: 5,
+			};
+			var bounds = mapMaxBounds();
+			if (bounds) {
+				mapOpts.maxBounds = bounds;
+			}
+			st.map = L.map(el, mapOpts).setView([25, 15], 2);
+			var tileOpts = {
+				maxZoom: 5,
+				minZoom: 2,
+				noWrap: true,
 				attribution: '',
-			}).addTo(st.map);
+			};
+			if (bounds) {
+				tileOpts.bounds = bounds;
+			}
+			L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', tileOpts).addTo(
+				st.map
+			);
 		}
 
 		if (st.geoLayer) {
 			applyMapColors(scope, data);
 			setTimeout(function () {
 				st.map.invalidateSize();
+				syncFeaturesHeight(scope);
 			}, 100);
 			return;
 		}
@@ -330,15 +579,25 @@
 						return {
 							fillColor: '#e2e8f0',
 							fillOpacity: 0.5,
-							weight: 0.6,
+							weight: 0.5,
 							color: '#fff',
 						};
 					},
+					filter: function (feature) {
+						var id = getNumId(feature);
+						return id !== 10;
+					},
+					smoothFactor: 1.25,
 				}).addTo(st.map);
+				var b = mapMaxBounds();
+				if (b) {
+					st.map.setMaxBounds(b);
+				}
 				st.loading = false;
 				applyMapColors(scope, data);
 				setTimeout(function () {
 					st.map.invalidateSize();
+					syncFeaturesHeight(scope);
 				}, 150);
 			})
 			.catch(function () {
@@ -366,12 +625,14 @@
 		if (feats.length < 2) {
 			setStatus($host, i18n('needFeatures', 'Отметьте не меньше двух признаков.'));
 			destroyCharts($host);
-			$host.find('.wsergo-cluster-viz-table-wrap').empty();
 			$host.find('.wsergo-cluster-viz-legend').empty();
+			clearBottomPanels(scope);
 			return;
 		}
 
 		setStatus($host, i18n('loading', 'Расчёт кластеров…'));
+		countriesPanel(scope).html('<p class="wsergo-cluster-panel-empty description">' + esc(i18n('loading', 'Расчёт кластеров…')) + '</p>');
+		analysisPanel(scope).html('<p class="wsergo-cluster-panel-empty description">' + esc(i18n('loading', 'Расчёт кластеров…')) + '</p>');
 
 		$.post(cfg.ajaxUrl, {
 			action: cfg.previewAction || 'wsergo_cluster_preview',
@@ -382,15 +643,15 @@
 		})
 			.done(function (res) {
 				if (!res || !res.success || !res.data) {
-					setStatus(
-						$host,
-						(res && res.data && res.data.message) || i18n('error', 'Ошибка')
-					);
+					var errMsg = (res && res.data && res.data.message) || i18n('error', 'Ошибка');
+					setStatus($host, errMsg);
+					clearBottomPanels(scope, errMsg);
 					return;
 				}
 				var data = res.data;
 				renderLegend($host, data);
-				renderTable($host, data);
+				renderClusterTabs(scope, data);
+				renderClusterAnalysis(scope, data);
 				var mode = $host.find('.wsergo-cluster-viz-mode.is-active').data('mode') || 'map';
 				if (mode === 'chart') {
 					renderCharts($host, data);
@@ -399,9 +660,14 @@
 				}
 				setStatus($host, summaryText(data));
 				$host.data('wsergoPreview', data);
+				setTimeout(function () {
+					syncFeaturesHeight(scope);
+				}, 120);
 			})
 			.fail(function () {
-				setStatus($host, i18n('error', 'Ошибка'));
+				var errMsg = i18n('error', 'Ошибка');
+				setStatus($host, errMsg);
+				clearBottomPanels(scope, errMsg);
 			});
 	}
 
@@ -415,11 +681,11 @@
 	function setMode($host, mode) {
 		$host.find('.wsergo-cluster-viz-mode').removeClass('is-active');
 		$host.find('.wsergo-cluster-viz-mode[data-mode="' + mode + '"]').addClass('is-active');
+		var scope = $host.data('scope') || 'country';
 		if (mode === 'map') {
 			$host.find('.wsergo-cluster-viz-map-pane').show();
 			$host.find('.wsergo-cluster-viz-chart-pane').hide();
 			var data = $host.data('wsergoPreview');
-			var scope = $host.data('scope');
 			if (data) {
 				initMap(scope, $host, data);
 			}
@@ -440,6 +706,9 @@
 				}
 			}, 80);
 		}
+		setTimeout(function () {
+			syncFeaturesHeight(scope);
+		}, 100);
 	}
 
 	$(document).on('change', '.wsergo-cluster-features-host input[type="checkbox"]', function () {
@@ -469,9 +738,13 @@
 			var scope = $(this).data('scope') || 'country';
 			scheduleRefresh(scope);
 		});
+		setTimeout(syncAllFeaturesHeights, 80);
 	});
 
 	$(document).ready(function () {
+		$('.wsergo-cluster-features-host--sync-height').each(function () {
+			attachKmeansHeightSync($(this).data('scope') || 'country');
+		});
 		$('.wsergo-cluster-viz-host').each(function () {
 			var $h = $(this);
 			var scope = $h.data('scope') || 'country';
@@ -483,27 +756,49 @@
 			}
 			scheduleRefresh(scope);
 		});
+		setTimeout(syncAllFeaturesHeights, 0);
+		setTimeout(syncAllFeaturesHeights, 400);
+		setTimeout(syncAllFeaturesHeights, 1200);
 	});
 
 	$(document).on('wsergo-scope-activated', function (_e, scope) {
 		if (scope === 'country') {
 			setTimeout(function () {
+				attachKmeansHeightSync('country');
 				scheduleRefresh('country');
 				var st = mapState.country;
 				if (st && st.map) {
 					st.map.invalidateSize();
 				}
+				syncFeaturesHeight('country');
 			}, 200);
 		}
 	});
 
-	$(document).on('click', '.wsergo-country-inner-nav a[data-tab="tab-data"]', function () {
+	$(document).on('wsergo-kmeans-layout-resize', function () {
+		attachKmeansHeightSync('country');
+		syncAllFeaturesHeights();
+	});
+
+	$(window).on('resize.wsergoClusterViz', function () {
+		$('.wsergo-cluster-features-host--sync-height').each(function () {
+			var scope = $(this).data('scope') || 'country';
+			syncFeaturesHeight(scope);
+		});
+	});
+
+	$(document).on('click', '.wsergo-country-inner-nav a[data-tab]', function () {
+		var tab = $(this).data('tab') || '';
 		setTimeout(function () {
-			scheduleRefresh('country');
-			var st = mapState.country;
-			if (st && st.map) {
-				st.map.invalidateSize();
+			if (tab === 'tab-data') {
+				scheduleRefresh('country');
+				var st = mapState.country;
+				if (st && st.map) {
+					st.map.invalidateSize();
+				}
 			}
+			attachKmeansHeightSync('country');
+			syncFeaturesHeight('country');
 		}, 300);
 	});
 }(jQuery));
