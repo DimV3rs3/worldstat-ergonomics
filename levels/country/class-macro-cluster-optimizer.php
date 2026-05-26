@@ -23,7 +23,7 @@ class WSErgo_Macro_Cluster_Optimizer {
 	/** Перезапуски при переборе признаков / k (быстрая оценка без силуэта). */
 	private const KMEANS_RESTARTS_PROBE = 2;
 	/** Сколько топ-признаков по CV участвуют в переборе. */
-	private const TUNE_TOP_CANDIDATES = 8;
+	private const TUNE_TOP_CANDIDATES = 28;
 	/** Доля стран в одном кластере, выше — сильный штраф при автоподборе. */
 	private const MAX_DOMINANT_CLUSTER_SHARE = 0.60;
 	/** Суммарная доля двух крупнейших кластеров, выше — штраф («два мешка»). */
@@ -32,9 +32,113 @@ class WSErgo_Macro_Cluster_Optimizer {
 	private const MIN_CLUSTER_SIZE_FRAC = 0.025;
 	/** Жёсткий минимум размера кластера (чтобы не было кластеров < 10 стран). */
 	private const MIN_CLUSTER_SIZE_ABS = 10;
+	/** Жёсткий минимум k для автоподбора (чтобы не было «2 мешка»). */
+	private const MIN_K_AUTOTUNE = 4;
 
 	/** @var array<string, list<list<float>>> Кэш стандартизованных матриц по набору признаков. */
 	private static $scaled_matrix_cache = array();
+
+	/**
+	 * Быстрый поиск валидной пары (features,k) под жёсткие ограничения.
+	 *
+	 * @param array<string, array<string, float>> $rows
+	 * @param array<string, array{cv:float,coverage:float,std:float,score:float}> $scored
+	 * @return array{features:list<string>,k:int,quality:float}|null
+	 */
+	private static function search_best_valid_solution_fast( array $rows, array $scored ): ?array {
+		$start_ts = microtime( true );
+		$time_budget_s = 6.5;
+
+		$pool = array_slice( array_keys( $scored ), 0, max( self::TUNE_TOP_CANDIDATES, self::MIN_FEATURES ) );
+		$pool = array_values( array_unique( array_map( 'sanitize_key', $pool ) ) );
+		if ( count( $pool ) < self::MIN_FEATURES ) {
+			return null;
+		}
+
+		$candidates = array();
+		$seed = self::select_features_for_separation( $rows, $scored );
+		if ( count( $seed ) >= self::MIN_FEATURES ) {
+			$candidates[] = $seed;
+		}
+		$alt = self::select_uncorrelated_features( $rows, $scored );
+		if ( count( $alt ) >= self::MIN_FEATURES ) {
+			$candidates[] = $alt;
+		}
+
+		$tries = 120;
+		for ( $t = 0; $t < $tries; $t++ ) {
+			if ( microtime( true ) - $start_ts > $time_budget_s ) {
+				break;
+			}
+			$want = random_int( self::MIN_FEATURES, min( self::MAX_FEATURES, count( $pool ) ) );
+			$tmp  = $pool;
+			shuffle( $tmp );
+			$set = array_slice( $tmp, 0, $want );
+			sort( $set );
+			$candidates[] = $set;
+		}
+
+		$best   = null;
+		$best_q = -INF;
+
+		foreach ( $candidates as $features ) {
+			if ( microtime( true ) - $start_ts > $time_budget_s ) {
+				break;
+			}
+			$d = count( $features );
+			if ( $d < self::MIN_FEATURES ) {
+				continue;
+			}
+			$X = self::get_scaled_matrix_for_features( $rows, $features );
+			if ( null === $X ) {
+				continue;
+			}
+			$n = count( $X );
+			$k_target = self::MIN_K_AUTOTUNE; // сейчас жёстко хотим k=4 как базовый сценарий.
+			$k_max    = self::max_k_allowed( $n, $d );
+			$k_list   = array( $k_target );
+			for ( $kk = $k_target + 1; $kk <= $k_max; $kk++ ) {
+				$k_list[] = $kk;
+			}
+
+			foreach ( $k_list as $k ) {
+				if ( microtime( true ) - $start_ts > $time_budget_s ) {
+					break;
+				}
+				$labels = self::kmeans_best_labels( $X, $k, 1, true, $d );
+				if ( empty( $labels ) ) {
+					continue;
+				}
+				$q = self::cluster_quality_score_fast( $X, $labels, $k, $d );
+				if ( ! is_finite( $q ) ) {
+					continue;
+				}
+
+				$counts = self::cluster_counts( $labels, $k );
+				$max_c  = (int) max( $counts );
+				$min_c  = (int) min( $counts );
+				$balance = $min_c / max( 1, $max_c );
+				$max_share = $max_c / (float) max( 1, $n );
+
+				// Усиливаем цель «примерно равномерно», но не стерильно:
+				// - стимулируем баланс,
+				// - слегка штрафуем за слишком «стерильную» равномерность только когда fit плохой.
+				$q += $balance * 0.18 + ( 1.0 - $max_share ) * 0.10;
+				$q += max( 0, $d - self::MIN_FEATURES ) * 0.012;
+
+				if ( $q > $best_q ) {
+					$best_q = $q;
+					$best   = array(
+						'features' => array_values( $features ),
+						'k'        => (int) $k,
+						'quality'  => $q,
+					);
+				}
+			}
+		}
+
+		return $best;
+	}
 
 	/**
 	 * Проверка жёстких ограничений на форму разбиения.
@@ -144,14 +248,16 @@ class WSErgo_Macro_Cluster_Optimizer {
 			);
 		}
 
-		$selected = self::select_features_for_separation( $rows, $scored );
-		if ( count( $selected ) < self::MIN_FEATURES ) {
-			$selected = self::select_uncorrelated_features( $rows, $scored );
+		$solution = self::search_best_valid_solution_fast( $rows, $scored );
+		if ( null === $solution ) {
+			return array(
+				'ok'      => false,
+				'message' => __( 'Автоподбор не нашёл разбиение, удовлетворяющее ограничениям (k ≥ 4, крупнейший кластер < 60%, каждый кластер ≥ 10 стран). Попробуйте другой год/набор признаков или отметьте признаки вручную.', 'worldstat-ergonomics' ),
+			);
 		}
-		$selected = self::ensure_min_features( $rows, $scored, $selected );
-		if ( count( $selected ) < 2 ) {
-			$selected = array_slice( array_keys( $scored ), 0, min( self::MAX_FEATURES, count( $scored ) ) );
-		}
+
+		$selected = $solution['features'];
+		$k        = (int) $solution['k'];
 
 		$matrix   = self::build_matrix_imputed( $rows, $selected );
 		$matrix_n = count( $matrix );
@@ -167,7 +273,6 @@ class WSErgo_Macro_Cluster_Optimizer {
 		}
 
 		$scaled = self::standard_scale_rows( $matrix );
-		$k      = self::optimal_k_for_separation( $scaled, count( $selected ) );
 		$report = self::build_feature_report( $scored, $selected );
 
 		$balance_note = '';
@@ -175,7 +280,7 @@ class WSErgo_Macro_Cluster_Optimizer {
 		if ( empty( $labels ) ) {
 			// Если для выбранного k не нашлось валидного разбиения — пробуем соседние k.
 			$k_max_try = self::max_k_allowed( $matrix_n, count( $selected ) );
-			for ( $try = 2; $try <= $k_max_try; $try++ ) {
+			for ( $try = self::MIN_K_AUTOTUNE; $try <= $k_max_try; $try++ ) {
 				if ( $try === $k ) {
 					continue;
 				}
@@ -210,7 +315,7 @@ class WSErgo_Macro_Cluster_Optimizer {
 			$matrix_n
 		) . $balance_note;
 		if ( empty( $labels ) ) {
-			$message .= ' ' . __( 'Предупреждение: не удалось найти разбиение, удовлетворяющее ограничениям; попробуйте другой набор признаков или уменьшите k.', 'worldstat-ergonomics' );
+			$message .= ' ' . __( 'Предупреждение: на финальном шаге k-means не удалось воспроизвести валидное разбиение (редко). Нажмите «Автоподбор» ещё раз.', 'worldstat-ergonomics' );
 		}
 		if ( $partial_tune ) {
 			$message .= ' ' . sprintf(
@@ -375,7 +480,7 @@ class WSErgo_Macro_Cluster_Optimizer {
 		$sqrt_cap = max( 3, (int) floor( sqrt( max( 4, $n ) ) / 1.35 ) );
 		$dim_cap  = 1 + (int) floor( 1.6 * $d );
 		$size_cap = (int) floor( $n / max( 1, self::MIN_CLUSTER_SIZE_ABS ) );
-		return max( 2, min( 8, $sqrt_cap, $dim_cap, max( 2, $n - 1 ), max( 2, $size_cap ) ) );
+		return max( self::MIN_K_AUTOTUNE, min( 8, $sqrt_cap, $dim_cap, max( self::MIN_K_AUTOTUNE, $n - 1 ), max( self::MIN_K_AUTOTUNE, $size_cap ) ) );
 	}
 
 	/**
@@ -383,16 +488,16 @@ class WSErgo_Macro_Cluster_Optimizer {
 	 */
 	private static function probe_k_values( int $n, int $num_features ): array {
 		$k_max = self::max_k_allowed( $n, $num_features );
-		$mid   = max( 3, (int) round( sqrt( max( 4, $n ) ) / 1.5 ) );
+		$mid   = max( self::MIN_K_AUTOTUNE, (int) round( sqrt( max( 4, $n ) ) / 1.5 ) );
 		$want  = array( $mid - 1, $mid, $mid + 1 );
 		$out   = array();
 		foreach ( $want as $k ) {
-			if ( $k >= 2 && $k <= $k_max ) {
+			if ( $k >= self::MIN_K_AUTOTUNE && $k <= $k_max ) {
 				$out[ $k ] = true;
 			}
 		}
 		if ( empty( $out ) ) {
-			$out[ min( $k_max, max( 2, $mid ) ) ] = true;
+			$out[ min( $k_max, max( self::MIN_K_AUTOTUNE, $mid ) ) ] = true;
 		}
 		return array_keys( $out );
 	}
@@ -846,7 +951,7 @@ class WSErgo_Macro_Cluster_Optimizer {
 	 */
 	private static function optimal_k_for_separation( array $X, int $num_features ): int {
 		$n        = count( $X );
-		$k_min    = 2;
+		$k_min    = self::MIN_K_AUTOTUNE;
 		$num_features = max( 2, $num_features );
 		$k_max    = self::max_k_allowed( $n, $num_features );
 		if ( $n <= $k_max ) {
@@ -1254,7 +1359,7 @@ class WSErgo_Macro_Cluster_Optimizer {
 		if ( count( $clean ) < self::MIN_FEATURES ) {
 			return;
 		}
-		$k = max( 2, min( self::max_k_allowed( 300, count( $clean ) ), $k ) );
+		$k = max( self::MIN_K_AUTOTUNE, min( self::max_k_allowed( 300, count( $clean ) ), $k ) );
 		if ( 'city' === $scope ) {
 			update_option( WSErgo_Settings::OPTION_CITY_MACRO_CLUSTER_FEATURES, $clean );
 			update_option( WSErgo_Settings::OPTION_CITY_MACRO_K_CLUSTERS, $k );
