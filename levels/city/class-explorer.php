@@ -190,7 +190,9 @@ class WSErgo_City_Explorer {
 			'chart_points_country' => __( 'Каждая точка — один город выбранной страны с рассчитанным листовым E и баллом выбранного показателя (0–100).', 'worldstat-ergonomics' ),
 			'chart_points_global'  => __( 'Каждая точка — один город из разных стран с рассчитанным листовым E и баллом показателя; сравнение идёт по единой шкале E.', 'worldstat-ergonomics' ),
 			'compare_title'        => __( 'Сравнение городов', 'worldstat-ergonomics' ),
-			'compare_hint'         => __( 'Выберите два или три города из списка (в том числе из разных стран). В таблице зелёным отмечено лучшее значение по строке, красным — слабее.', 'worldstat-ergonomics' ),
+			'compare_hint'         => __( 'Выберите два или три города из разных стран. Сравнение городов внутри одной страны недоступно. В таблице зелёным — лучшее значение по строке, красным — слабее.', 'worldstat-ergonomics' ),
+			'cmp_country_only'     => __( 'Сравнение городов доступно только между разными странами. Переключите контекст на «Между странами (общий E)».', 'worldstat-ergonomics' ),
+			'cmp_same_country'     => __( 'Нельзя сравнивать города одной страны. Выберите города из разных стран.', 'worldstat-ergonomics' ),
 			'compare_city_1'       => __( 'Город 1', 'worldstat-ergonomics' ),
 			'compare_city_2'       => __( 'Город 2', 'worldstat-ergonomics' ),
 			'compare_city_3'       => __( 'Город 3 (необязательно)', 'worldstat-ergonomics' ),
@@ -205,6 +207,18 @@ class WSErgo_City_Explorer {
 			'cmp_section_axes'     => __( 'Сводные индексы', 'worldstat-ergonomics' ),
 			'cmp_section_indicators' => __( 'Детальные показатели', 'worldstat-ergonomics' ),
 			'cmp_summary_title'    => __( 'Краткий итог по выбранным городам', 'worldstat-ergonomics' ),
+			'cmp_help_method'      => __( 'Среди выбранных городов сравниваются числовые значения из таблицы ниже (шкала 0–100, чем выше — тем лучше). Город с наибольшим значением считается сильнее по этой строке; при равенстве лидерство не присваивается.', 'worldstat-ergonomics' ),
+			'cmp_help_values'      => __( 'Значения по выбранным городам', 'worldstat-ergonomics' ),
+			'cmp_help_source_e'    => __( 'Индекс E — сводный листовой индекс эргономичности города по единой методике; в таблице используется значение E из сводной таблицы городов (если есть) или рассчитанный листовой E.', 'worldstat-ergonomics' ),
+			'cmp_help_source_dim'  => __( 'Измерение — агрегированный балл 0–100 по листовым показателям этого критерия (взвешенное среднее нормализованных значений). В таблице приоритет у подиндексов импорта Cities, иначе — расчёт по карте полей.', 'worldstat-ergonomics' ),
+			'cmp_help_source_ind'  => __( 'Детальный показатель — нормализованный балл 0–100, полученный из сырого значения по правилам карты полей города.', 'worldstat-ergonomics' ),
+			'cmp_help_dim_about'   => __( 'О измерении:', 'worldstat-ergonomics' ),
+			'cmp_help_ind_norm'    => __( 'Нормализация: сырое значение переводится в балл 0–100 линейно на отрезке [%1$s … %2$s]; %3$s.', 'worldstat-ergonomics' ),
+			'cmp_help_higher'      => __( 'больше сырое значение — выше балл', 'worldstat-ergonomics' ),
+			'cmp_help_lower'       => __( 'меньше сырое значение — выше балл', 'worldstat-ergonomics' ),
+			'cmp_help_raw'         => __( 'Сырые значения', 'worldstat-ergonomics' ),
+			'cmp_help_dimension'   => __( 'Измерение:', 'worldstat-ergonomics' ),
+			'cmp_help_toggle'      => __( 'Как проводилось сравнение', 'worldstat-ergonomics' ),
 			'chart_highlight_multi' => __( 'На графике выделены сравниваемые города:', 'worldstat-ergonomics' ),
 			'chart_highlight_multi_desc' => __( 'Города, выбранные для сравнения (цветные точки на графике).', 'worldstat-ergonomics' ),
 			'chart_highlight_single_desc' => __( 'Город, выбранный в списке выше (красная обводка).', 'worldstat-ergonomics' ),
@@ -266,7 +280,7 @@ class WSErgo_City_Explorer {
 		echo '<div class="wsergo-city-explorer__header">';
 		echo '<h3 class="wsergo-city-explorer__title">' . esc_html__( 'Анализ города', 'worldstat-ergonomics' ) . '</h3>';
 		echo '</div>';
-		echo '<p class="wsergo-city-explorer__intro">' . esc_html__( 'Выберите город: показатели (сырые значения и баллы 0–100), сравнение с другими городами и регрессионные подсказки по направлениям безопасности, комфорта, управляемости и др. Можно сравнивать города в пределах страны или между странами по общему индексу E.', 'worldstat-ergonomics' ) . '</p>';
+		echo '<p class="wsergo-city-explorer__intro">' . esc_html__( 'Выберите город: показатели (сырые значения и баллы 0–100), сравнение с городами других стран и регрессионные подсказки по направлениям безопасности, комфорта, управляемости и др. Сравнение городов — только между разными странами (режим «Между странами»).', 'worldstat-ergonomics' ) . '</p>';
 
 		echo '<div class="wsergo-city-explorer__toolbar">';
 		echo '<fieldset class="wsergo-city-explorer__scope">';
@@ -296,7 +310,7 @@ class WSErgo_City_Explorer {
 
 		echo '<section class="wsergo-city-explorer__section wsergo-city-explorer__compare-wrap" id="' . esc_attr( $uid ) . '-compare-wrap">';
 		echo '<h4 class="wsergo-city-explorer__section-title">' . esc_html__( 'Сравнение городов', 'worldstat-ergonomics' ) . '</h4>';
-		echo '<p class="wsergo-city-explorer__section-hint">' . esc_html__( 'Откройте выпадающий список, найдите город через поиск и выберите 2–3 города (в том числе из разных стран). В таблице зелёным — лучшее значение, красным — слабее.', 'worldstat-ergonomics' ) . '</p>';
+		echo '<p class="wsergo-city-explorer__section-hint">' . esc_html__( 'Доступно в режиме «Между странами». Выберите 2–3 города из разных стран. В таблице зелёным — лучшее значение, красным — слабее.', 'worldstat-ergonomics' ) . '</p>';
 		echo '<div class="wsergo-cmp-pickers">';
 		$cmp_labels = [
 			__( 'Город 1', 'worldstat-ergonomics' ),

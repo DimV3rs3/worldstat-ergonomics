@@ -61,6 +61,7 @@
 		var chartWrap = document.getElementById( uid + '-chart-wrap' );
 		var chartPoints = document.getElementById( uid + '-chart-points-desc' );
 		var chartHiDesc = document.getElementById( uid + '-chart-highlight-desc' );
+		var compareWrap = document.getElementById( uid + '-compare-wrap' );
 		var compareBody = document.getElementById( uid + '-compare-body' );
 		var compareIds = [];
 		var compareReq = 0;
@@ -73,6 +74,91 @@
 
 		function cmpSlotId( slot ) {
 			return uid + '-cmp-' + slot;
+		}
+
+		function cityCountryKey( c ) {
+			if ( ! c ) {
+				return '';
+			}
+			var iso = c.country_iso2 ? String( c.country_iso2 ).toUpperCase() : '';
+			if ( iso ) {
+				return iso;
+			}
+			return decodeHtml( c.country_name || '' )
+				.toLowerCase()
+				.replace( /\s+/g, ' ' )
+				.trim();
+		}
+
+		function getBlockedCountriesForSlot( slot ) {
+			var blocked = [];
+			[ 'a', 'b', 'c' ].forEach( function ( s ) {
+				if ( s === slot ) {
+					return;
+				}
+				var root = document.getElementById( cmpSlotId( s ) );
+				var hid = root && root.querySelector( '.wsergo-city-search__id' );
+				var id = hid && hid.value;
+				if ( ! id || ! cityIndex[ id ] ) {
+					return;
+				}
+				var key = cityCountryKey( cityIndex[ id ] );
+				if ( key && blocked.indexOf( key ) < 0 ) {
+					blocked.push( key );
+				}
+			} );
+			return blocked;
+		}
+
+		function compareIdsHaveSameCountry( ids ) {
+			var seen = {};
+			var i, key;
+			for ( i = 0; i < ids.length; i++ ) {
+				key = cityCountryKey( cityIndex[ ids[ i ] ] );
+				if ( ! key ) {
+					continue;
+				}
+				if ( seen[ key ] ) {
+					return true;
+				}
+				seen[ key ] = true;
+			}
+			return false;
+		}
+
+		function refreshCompareSearchEntries() {
+			[ 'a', 'b', 'c' ].forEach( function ( slot ) {
+				var root = document.getElementById( cmpSlotId( slot ) );
+				if ( root && typeof root.wsergoUpdateCityIndex === 'function' ) {
+					root.wsergoUpdateCityIndex( cityIndex );
+				}
+			} );
+		}
+
+		function clearConflictingCompareSlots( changedSlot ) {
+			var order = [ 'a', 'b', 'c' ];
+			var start = order.indexOf( changedSlot );
+			if ( start < 0 ) {
+				return;
+			}
+			var si;
+			for ( si = start + 1; si < order.length; si++ ) {
+				var slot = order[ si ];
+				var root = document.getElementById( cmpSlotId( slot ) );
+				if ( ! root ) {
+					continue;
+				}
+				var hid = root.querySelector( '.wsergo-city-search__id' );
+				var id = hid && hid.value;
+				if ( ! id || ! cityIndex[ id ] ) {
+					continue;
+				}
+				if ( getBlockedCountriesForSlot( slot ).indexOf( cityCountryKey( cityIndex[ id ] ) ) >= 0 ) {
+					if ( typeof root.wsergoClearCity === 'function' ) {
+						root.wsergoClearCity();
+					}
+				}
+			}
 		}
 
 		function decodeHtml( s ) {
@@ -334,7 +420,17 @@
 					selectLabel: cfg.empty ? ( UI.cmp_none || '' ) : ( UI.select_placeholder || '' ),
 					emptyLabel: UI.cmp_none || '',
 					noResults: UI.search_no_results || '',
+					filterCity: function ( c ) {
+						if ( scope !== 'global' ) {
+							return false;
+						}
+						var blocked = getBlockedCountriesForSlot( cfg.s );
+						var key = cityCountryKey( c );
+						return ! key || blocked.indexOf( key ) < 0;
+					},
 					onChange: function () {
+						refreshCompareSearchEntries();
+						clearConflictingCompareSlots( cfg.s );
 						renderCompareView();
 					},
 				} );
@@ -342,25 +438,34 @@
 		}
 
 		function fillDefaultCompareSlots() {
-			var ids = Object.keys( cityIndex );
-			ids.sort( function ( a, bb ) {
-				return cityLabel( cityIndex[ a ] || {} ).localeCompare( cityLabel( cityIndex[ bb ] || {} ), 'ru' );
+			if ( scope !== 'global' ) {
+				return;
+			}
+			var byCountry = {};
+			Object.keys( cityIndex ).forEach( function ( id ) {
+				var key = cityCountryKey( cityIndex[ id ] );
+				if ( ! key ) {
+					return;
+				}
+				if ( ! byCountry[ key ] ) {
+					byCountry[ key ] = [];
+				}
+				byCountry[ key ].push( id );
+			} );
+			var countries = Object.keys( byCountry );
+			if ( countries.length < 2 ) {
+				return;
+			}
+			countries.sort( function ( a, bb ) {
+				return byCountry[ bb ].length - byCountry[ a ].length;
 			} );
 			var ra = document.getElementById( cmpSlotId( 'a' ) );
 			var rb = document.getElementById( cmpSlotId( 'b' ) );
-			if ( ids.length >= 1 && ra && ra.wsergoSetCity ) {
-				ra.wsergoSetCity( ids[ 0 ], true );
+			if ( ra && ra.wsergoSetCity ) {
+				ra.wsergoSetCity( byCountry[ countries[ 0 ] ][ 0 ], true );
 			}
-			if ( ids.length >= 2 && rb && rb.wsergoSetCity ) {
-				var bid = ids[ 1 ];
-				var bx;
-				for ( bx = 0; bx < ids.length; bx++ ) {
-					if ( ids[ bx ] !== ids[ 0 ] ) {
-						bid = ids[ bx ];
-						break;
-					}
-				}
-				rb.wsergoSetCity( bid, true );
+			if ( rb && rb.wsergoSetCity ) {
+				rb.wsergoSetCity( byCountry[ countries[ 1 ] ][ 0 ], true );
 			}
 		}
 
@@ -375,9 +480,19 @@
 				if ( ! compareBody ) {
 					return;
 				}
+				if ( scope !== 'global' ) {
+					compareBody.innerHTML =
+						'<p class="wsergo-cmp-placeholder">' + esc( UI.cmp_country_only || '' ) + '</p>';
+					return;
+				}
 				if ( compareIds.length < 2 ) {
 					compareBody.innerHTML =
 						'<p class="wsergo-cmp-placeholder">' + esc( UI.cmp_need_two || '' ) + '</p>';
+					return;
+				}
+				if ( compareIdsHaveSameCountry( compareIds ) ) {
+					compareBody.innerHTML =
+						'<p class="wsergo-cmp-error">' + esc( UI.cmp_same_country || '' ) + '</p>';
 					return;
 				}
 				compareBody.innerHTML =
@@ -420,6 +535,7 @@
 							dimLabels: dimLab,
 							eLabel: UI.e_label || 'E',
 							axisLabels: AXL,
+							help: data.data.help || {},
 							strings: {
 								need_two: UI.cmp_need_two,
 								metric: UI.cmp_metric,
@@ -431,6 +547,18 @@
 								section_axes: UI.cmp_section_axes,
 								section_indicators: UI.cmp_section_indicators,
 								summary_title: UI.cmp_summary_title,
+								help_method: UI.cmp_help_method,
+								help_values: UI.cmp_help_values,
+								help_source_e: UI.cmp_help_source_e,
+								help_source_dim: UI.cmp_help_source_dim,
+								help_source_ind: UI.cmp_help_source_ind,
+								help_dim_about: UI.cmp_help_dim_about,
+								help_ind_norm: UI.cmp_help_ind_norm,
+								help_higher: UI.cmp_help_higher,
+								help_lower: UI.cmp_help_lower,
+								help_raw: UI.cmp_help_raw,
+								help_dimension: UI.cmp_help_dimension,
+								help_toggle: UI.cmp_help_toggle,
 							},
 						} );
 					} )
@@ -448,6 +576,9 @@
 
 		function setExplorerMode() {
 			r.classList.toggle( 'wsergo-city-explorer--global', scope === 'global' );
+			if ( compareWrap ) {
+				compareWrap.hidden = scope !== 'global';
+			}
 			if ( chartWrap ) {
 				if ( scope === 'global' ) {
 					chartWrap.classList.add( 'is-empty' );
@@ -534,8 +665,10 @@
 			} else {
 				rebuildCitySelect();
 				rebuildChartSelect();
-				fillDefaultCompareSlots();
-				renderCompareView();
+				if ( compareBody ) {
+					compareBody.innerHTML =
+						'<p class="wsergo-cmp-placeholder">' + esc( UI.cmp_country_only || '' ) + '</p>';
+				}
 				renderAll();
 			}
 		}

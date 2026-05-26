@@ -69,6 +69,22 @@ class WSErgo_Model {
 	}
 
 	/**
+	 * Краткие пояснения шести измерений для публичного сравнения городов.
+	 *
+	 * @return array<string, string>
+	 */
+	public static function get_dimension_descriptions(): array {
+		return [
+			self::DIM_FUNCTIONALITY => __( 'Доступность, функциональное смешение и связность городской среды (Acc, Mix, Conn).', 'worldstat-ergonomics' ),
+			self::DIM_SAFETY        => __( 'Преступность, транспортная безопасность, экологические риски и доступность экстренных служб.', 'worldstat-ergonomics' ),
+			self::DIM_COMFORT       => __( 'Комфорт среды, инфраструктура и эстетика (C_env, C_infra, C_aesthetic).', 'worldstat-ergonomics' ),
+			self::DIM_LIVABILITY    => __( 'Обитаемость: качество среды с учётом стоимости жизни и устойчивости проживания.', 'worldstat-ergonomics' ),
+			self::DIM_MASTERABILITY => __( 'Освояемость: навигация, семантика среды и читаемость городской структуры.', 'worldstat-ergonomics' ),
+			self::DIM_MANAGEABILITY => __( 'Управляемость: ответственность, данные и мониторинг, сложность управления средой.', 'worldstat-ergonomics' ),
+		];
+	}
+
+	/**
 	 * meta_key поста для измерения.
 	 */
 	public static function meta_key_for_dimension( string $dim ): string {

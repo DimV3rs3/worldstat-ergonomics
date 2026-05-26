@@ -35,11 +35,14 @@
 		return n;
 	}
 
-	function buildEntries( index ) {
+	function buildEntries( index, filterCity ) {
 		return Object.keys( index || {} )
 			.map( function ( id ) {
 				var c = index[ id ];
 				if ( ! c ) {
+					return null;
+				}
+				if ( typeof filterCity === 'function' && ! filterCity( c ) ) {
 					return null;
 				}
 				return {
@@ -88,15 +91,19 @@
 		var entries = null;
 		var destroyed = false;
 
+		function entryFilter() {
+			return typeof opts.filterCity === 'function' ? opts.filterCity : null;
+		}
+
 		function getEntries() {
 			if ( ! entries ) {
-				entries = buildEntries( index );
+				entries = buildEntries( index, entryFilter() );
 			}
 			return entries;
 		}
 
 		function refreshEntries() {
-			entries = buildEntries( index );
+			entries = buildEntries( index, entryFilter() );
 		}
 
 		function closePanel() {

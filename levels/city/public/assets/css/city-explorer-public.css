@@ -890,10 +890,104 @@
 
 .wsergo-city-explorer .wsergo-cmp-summary__metrics {
 	margin: 0;
-	padding: 0 0 0 1.1em;
+	padding: 0;
+	list-style: none;
 	font-size: 13px;
 	line-height: 1.5;
 	color: var(--wsp-gray-800, #1f2937);
+}
+
+.wsergo-city-explorer .wsergo-cmp-metric-item {
+	margin-bottom: 6px;
+}
+
+.wsergo-city-explorer .wsergo-cmp-metric-item:last-child {
+	margin-bottom: 0;
+}
+
+.wsergo-city-explorer .wsergo-cmp-metric-details {
+	border: 1px solid rgba(0, 0, 0, 0.08);
+	border-radius: 8px;
+	background: rgba(255, 255, 255, 0.65);
+	overflow: hidden;
+}
+
+.wsergo-city-explorer .wsergo-cmp-summary__block--win .wsergo-cmp-metric-details {
+	border-color: rgba(22, 101, 52, 0.18);
+}
+
+.wsergo-city-explorer .wsergo-cmp-summary__block--loss .wsergo-cmp-metric-details {
+	border-color: rgba(153, 27, 27, 0.18);
+}
+
+.wsergo-city-explorer .wsergo-cmp-metric-summary {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 6px 10px;
+	cursor: pointer;
+	list-style: none;
+	font-weight: 500;
+}
+
+.wsergo-city-explorer .wsergo-cmp-metric-summary::-webkit-details-marker {
+	display: none;
+}
+
+.wsergo-city-explorer .wsergo-cmp-metric-summary::after {
+	content: '▾';
+	flex-shrink: 0;
+	font-size: 11px;
+	opacity: 0.55;
+	transition: transform 0.15s ease;
+}
+
+.wsergo-city-explorer .wsergo-cmp-metric-details[open] .wsergo-cmp-metric-summary::after {
+	transform: rotate(180deg);
+}
+
+.wsergo-city-explorer .wsergo-cmp-metric-summary__hint {
+	font-size: 11px;
+	font-weight: 400;
+	color: var(--wsp-gray-500, #6b7280);
+	white-space: nowrap;
+}
+
+.wsergo-city-explorer .wsergo-cmp-metric-help {
+	padding: 0 10px 10px;
+	font-size: 12px;
+	line-height: 1.55;
+	color: var(--wsp-gray-700, #374151);
+	border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.wsergo-city-explorer .wsergo-cmp-metric-help__lead,
+.wsergo-city-explorer .wsergo-cmp-metric-help__note {
+	margin: 8px 0 0;
+}
+
+.wsergo-city-explorer .wsergo-cmp-metric-help__subhead {
+	margin: 10px 0 4px;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	color: var(--wsp-gray-500, #6b7280);
+}
+
+.wsergo-city-explorer .wsergo-cmp-metric-help__vals {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.wsergo-city-explorer .wsergo-cmp-metric-help__vals li {
+	margin-bottom: 3px;
+}
+
+.wsergo-city-explorer .wsergo-cmp-metric-help__city {
+	color: var(--wsp-gray-600, #4b5563);
 }
 
 .wsergo-city-explorer .wsergo-cmp-summary__metrics li {

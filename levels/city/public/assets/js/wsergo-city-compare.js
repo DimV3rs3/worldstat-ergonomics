@@ -76,16 +76,155 @@
 		return h;
 	}
 
-	function metricListHtml( items ) {
-		if ( ! items || ! items.length ) {
+	function metricListHtml( rowKeys, rowMeta, cities, ids, help, strings ) {
+		if ( ! rowKeys || ! rowKeys.length ) {
 			return '';
 		}
 		var h = '<ul class="wsergo-cmp-summary__metrics">';
 		var i;
-		for ( i = 0; i < items.length; i++ ) {
-			h += '<li>' + esc( items[ i ] ) + '</li>';
+		for ( i = 0; i < rowKeys.length; i++ ) {
+			var rowKey = rowKeys[ i ];
+			var row = rowMeta[ rowKey ];
+			var label = row && row.label ? row.label : rowKey;
+			var helpBody = buildMetricHelpBody( rowKey, rowMeta, cities, ids, help, strings );
+			h += '<li class="wsergo-cmp-metric-item">';
+			if ( helpBody ) {
+				h +=
+					'<details class="wsergo-cmp-metric-details">' +
+					'<summary class="wsergo-cmp-metric-summary">' +
+					'<span class="wsergo-cmp-metric-summary__label">' +
+					esc( label ) +
+					'</span>' +
+					'<span class="wsergo-cmp-metric-summary__hint">' +
+					esc( strings.help_toggle || 'Как проводилось сравнение' ) +
+					'</span>' +
+					'</summary>' +
+					'<div class="wsergo-cmp-metric-help">' +
+					helpBody +
+					'</div></details>';
+			} else {
+				h += esc( label );
+			}
+			h += '</li>';
 		}
 		h += '</ul>';
+		return h;
+	}
+
+	function indicatorRawForCity( c, iid ) {
+		if ( ! c || ! c.indicators ) {
+			return null;
+		}
+		var j;
+		for ( j = 0; j < c.indicators.length; j++ ) {
+			if ( String( c.indicators[ j ].id ) === String( iid ) ) {
+				return c.indicators[ j ];
+			}
+		}
+		return null;
+	}
+
+	function cityLineLabel( c ) {
+		var n = displayName( c.name || '' );
+		if ( c.country_name ) {
+			n += ' (' + displayName( c.country_name ) + ')';
+		}
+		return n;
+	}
+
+	function buildMetricHelpBody( rowKey, rowMeta, cities, ids, help, strings ) {
+		var row = rowMeta[ rowKey ];
+		if ( ! row || typeof row.get !== 'function' ) {
+			return '';
+		}
+		help = help || {};
+		strings = strings || {};
+
+		var h = '';
+		h += '<p class="wsergo-cmp-metric-help__lead">' + esc( strings.help_method || '' ) + '</p>';
+
+		h += '<p class="wsergo-cmp-metric-help__subhead">' + esc( strings.help_values || 'Значения' ) + '</p>';
+		h += '<ul class="wsergo-cmp-metric-help__vals">';
+		var i;
+		for ( i = 0; i < ids.length; i++ ) {
+			var c = cities[ ids[ i ] ];
+			var v = row.get( c );
+			h +=
+				'<li><span class="wsergo-cmp-metric-help__city">' +
+				cityLineLabel( c ) +
+				'</span>: <strong>' +
+				( v != null ? esc( fmtNum( v ) ) : '—' ) +
+				'</strong></li>';
+		}
+		h += '</ul>';
+
+		if ( rowKey === '__e__' ) {
+			h += '<p class="wsergo-cmp-metric-help__note">' + esc( strings.help_source_e || '' ) + '</p>';
+		} else if ( row.isAxis ) {
+			h += '<p class="wsergo-cmp-metric-help__note">' + esc( strings.help_source_dim || '' ) + '</p>';
+			if ( row.dimKey && help.dimensions && help.dimensions[ row.dimKey ] ) {
+				h +=
+					'<p class="wsergo-cmp-metric-help__note"><strong>' +
+					esc( strings.help_dim_about || '' ) +
+					'</strong> ' +
+					esc( help.dimensions[ row.dimKey ] ) +
+					'</p>';
+			}
+		} else if ( rowKey.indexOf( 'ind:' ) === 0 ) {
+			var indId = rowKey.slice( 4 );
+			h += '<p class="wsergo-cmp-metric-help__note">' + esc( strings.help_source_ind || '' ) + '</p>';
+			var def = help.indicators && help.indicators[ indId ];
+			if ( def ) {
+				var dimLab = '';
+				if ( def.dimension && help.dimensions && help.dimensions[ def.dimension ] ) {
+					dimLab = help.dimensions[ def.dimension ];
+				}
+				if ( dimLab ) {
+					h +=
+						'<p class="wsergo-cmp-metric-help__note"><strong>' +
+						esc( strings.help_dimension || 'Измерение:' ) +
+						'</strong> ' +
+						esc( dimLab ) +
+						'</p>';
+				}
+				var dirTxt =
+					def.direction === 'lower_better'
+						? strings.help_lower || ''
+						: strings.help_higher || '';
+				var normTpl = strings.help_ind_norm || '';
+				h +=
+					'<p class="wsergo-cmp-metric-help__note">' +
+					esc(
+						normTpl
+							.replace( '%1$s', String( def.vmin ) )
+							.replace( '%2$s', String( def.vmax ) )
+							.replace( '%3$s', dirTxt )
+					) +
+					( def.unit ? ' ' + esc( '(' + def.unit + ')' ) : '' ) +
+					'</p>';
+			}
+			var hasRaw = false;
+			var rawH = '<p class="wsergo-cmp-metric-help__subhead">' + esc( strings.help_raw || 'Сырые значения' ) + '</p><ul class="wsergo-cmp-metric-help__vals">';
+			for ( i = 0; i < ids.length; i++ ) {
+				c = cities[ ids[ i ] ];
+				var indRow = indicatorRawForCity( c, indId );
+				if ( indRow && indRow.raw_value != null && indRow.raw_value !== '' ) {
+					hasRaw = true;
+					rawH +=
+						'<li><span class="wsergo-cmp-metric-help__city">' +
+						cityLineLabel( c ) +
+						'</span>: ' +
+						esc( indRow.raw_value ) +
+						( def && def.unit ? ' ' + esc( def.unit ) : '' ) +
+						'</li>';
+				}
+			}
+			rawH += '</ul>';
+			if ( hasRaw ) {
+				h += rawH;
+			}
+		}
+
 		return h;
 	}
 
@@ -189,10 +328,10 @@
 				tieBest = bestIds.length > 1;
 				tieWorst = worstIds.length > 1;
 				if ( ! tieBest && bestIds.length === 1 ) {
-					wins[ bestIds[ 0 ].id ].push( row.label );
+					wins[ bestIds[ 0 ].id ].push( row.key );
 				}
 				if ( ! tieWorst && worstIds.length === 1 ) {
-					losses[ worstIds[ 0 ].id ].push( row.label );
+					losses[ worstIds[ 0 ].id ].push( row.key );
 				}
 			}
 		}
@@ -243,7 +382,7 @@
 	 * @param {HTMLElement} el
 	 * @param {Object<string,object>} cities
 	 * @param {string[]} ids
-	 * @param {{dimKeys:string[],dimLabels:Object,eLabel:string,axisLabels:Object,strings:Object}} opts
+	 * @param {{dimKeys:string[],dimLabels:Object,eLabel:string,axisLabels:Object,strings:Object,help:Object}} opts
 	 * @returns {number[]} numeric city ids for chart highlight
 	 */
 	function renderCityCompare( el, cities, ids, opts ) {
@@ -255,7 +394,9 @@
 		var dimLab = opts.dimLabels || {};
 		var axl = opts.axisLabels || {};
 		var s = opts.strings || {};
+		var help = opts.help || {};
 		var eLab = opts.eLabel || 'E';
+		var rowMeta = {};
 
 		ids = ( ids || [] ).filter( function ( id ) {
 			return id && cities[ id ];
@@ -268,14 +409,17 @@
 			return [];
 		}
 
-		var axisRows = [ { key: '__e__', label: eLab, isAxis: true, get: cityE } ];
+		var axisRows = [
+			{ key: '__e__', label: eLab, isAxis: true, dimKey: '', get: cityE },
+		];
 		var di, dk;
 		for ( di = 0; di < dimKeys.length; di++ ) {
 			dk = dimKeys[ di ];
 			axisRows.push( {
-				key: dk,
+				key: 'dim:' + dk,
 				label: dimLab[ dk ] || axl[ dk ] || dk,
 				isAxis: true,
+				dimKey: dk,
 				get: ( function ( dimKey ) {
 					return function ( c ) {
 						return dimValue( c, dimKey );
@@ -293,6 +437,7 @@
 					label: meta.label,
 					sub: axl[ meta.dimension ] || meta.dimension || '',
 					isAxis: false,
+					dimKey: meta.dimension || '',
 					get: function ( c ) {
 						return scoreForIndicator( c, meta.id );
 					},
@@ -301,6 +446,11 @@
 					indicatorRows.push( row );
 				}
 			} )( indicators[ di ] );
+		}
+
+		var allRows = axisRows.concat( indicatorRows );
+		for ( di = 0; di < allRows.length; di++ ) {
+			rowMeta[ allRows[ di ].key ] = allRows[ di ];
 		}
 
 		var wins = {};
@@ -361,7 +511,7 @@
 					'<h5 class="wsergo-cmp-summary__block-title">' +
 					esc( s.stronger || 'Сильнее' ) +
 					'</h5>' +
-					metricListHtml( wins[ id ] ) +
+					metricListHtml( wins[ id ], rowMeta, cities, ids, help, s ) +
 					'</section>';
 			}
 			if ( losses[ id ].length ) {
@@ -370,7 +520,7 @@
 					'<h5 class="wsergo-cmp-summary__block-title">' +
 					esc( s.weaker || 'Слабее' ) +
 					'</h5>' +
-					metricListHtml( losses[ id ] ) +
+					metricListHtml( losses[ id ], rowMeta, cities, ids, help, s ) +
 					'</section>';
 			}
 			if ( ! wins[ id ].length && ! losses[ id ].length ) {

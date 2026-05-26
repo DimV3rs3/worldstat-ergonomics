@@ -451,9 +451,79 @@ class WSErgo_City_Data {
 			];
 		}
 
+		$country_keys = [];
+		foreach ( $payload as $row ) {
+			$iso2 = strtoupper( (string) ( $row['country_iso2'] ?? '' ) );
+			$key  = $iso2 !== '' ? $iso2 : mb_strtolower( trim( (string) ( $row['country_name'] ?? '' ) ) );
+			if ( $key === '' ) {
+				continue;
+			}
+			$country_keys[ $key ] = ( $country_keys[ $key ] ?? 0 ) + 1;
+		}
+		foreach ( $country_keys as $count ) {
+			if ( $count > 1 ) {
+				return [
+					'error' => __( 'Сравнение возможно только между городами разных стран. Выберите города из разных стран.', 'worldstat-ergonomics' ),
+				];
+			}
+		}
+
 		return [
 			'cities' => $payload,
 			'scope'  => 'compare',
+			'help'   => self::build_compare_help_payload(),
+		];
+	}
+
+	/**
+	 * Справочник измерений и показателей для пояснений в блоке сравнения.
+	 *
+	 * @return array{dimensions: array<string, string>, indicators: array<string, array<string, mixed>>}
+	 */
+	private static function build_compare_help_payload(): array {
+		$dimensions = class_exists( 'WSErgo_Model' ) ? WSErgo_Model::get_dimension_descriptions() : [];
+		$indicators = [];
+
+		if ( class_exists( 'WSErgo_Indicators' ) ) {
+			foreach ( WSErgo_Indicators::get_definitions() as $def ) {
+				$id = isset( $def['id'] ) ? (string) $def['id'] : '';
+				if ( $id === '' ) {
+					continue;
+				}
+				$indicators[ $id ] = [
+					'label'     => (string) ( $def['label'] ?? $id ),
+					'dimension' => (string) ( $def['dimension'] ?? '' ),
+					'unit'      => (string) ( $def['unit'] ?? '' ),
+					'vmin'      => (float) ( $def['vmin'] ?? 0 ),
+					'vmax'      => (float) ( $def['vmax'] ?? 100 ),
+					'direction' => (string) ( $def['direction'] ?? 'higher_better' ),
+				];
+			}
+		}
+
+		if ( class_exists( 'WSErgo_City_Defaults' ) ) {
+			foreach ( WSErgo_City_Defaults::default_indicator_definitions() as $def ) {
+				if ( ! is_array( $def ) ) {
+					continue;
+				}
+				$id = isset( $def['id'] ) ? sanitize_key( (string) $def['id'] ) : '';
+				if ( $id === '' || isset( $indicators[ $id ] ) ) {
+					continue;
+				}
+				$indicators[ $id ] = [
+					'label'     => (string) ( $def['label'] ?? $id ),
+					'dimension' => (string) ( $def['dimension'] ?? '' ),
+					'unit'      => (string) ( $def['unit'] ?? '' ),
+					'vmin'      => isset( $def['vmin'] ) ? (float) $def['vmin'] : 0.0,
+					'vmax'      => isset( $def['vmax'] ) ? (float) $def['vmax'] : 100.0,
+					'direction' => isset( $def['direction'] ) && 'lower_better' === $def['direction'] ? 'lower_better' : 'higher_better',
+				];
+			}
+		}
+
+		return [
+			'dimensions' => $dimensions,
+			'indicators' => $indicators,
 		];
 	}
 
