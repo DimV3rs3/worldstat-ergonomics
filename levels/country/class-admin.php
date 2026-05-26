@@ -178,7 +178,7 @@ class WSErgo_Country_Admin {
 		$url_viz     = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::url( 'country', $js_viz ) : WSERGO_URL . 'levels/country/' . $js_viz;
 		$url_css_viz = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::url( 'country', $css_viz ) : WSERGO_URL . 'levels/country/' . $css_viz;
 		$ver_country = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $js_country ) : WSERGO_VERSION;
-		$ver_tune    = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $js_tune ) : WSERGO_VERSION;
+		$ver_tune    = ( class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $js_tune ) : WSERGO_VERSION ) . '-tune2';
 		$ver_viz     = ( class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $js_viz ) : WSERGO_VERSION ) . '-legend1';
 		$ver_css_viz = ( class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $css_viz ) : WSERGO_VERSION ) . '-iso3ru1';
 
@@ -265,7 +265,7 @@ class WSErgo_Country_Admin {
 					'analysisTitle' => __( 'Аналитика кластеризации', 'worldstat-ergonomics' ),
 					'featuresLabel'   => __( 'Признаки', 'worldstat-ergonomics' ),
 					'noInsights'      => __( 'Недостаточно данных для выводов.', 'worldstat-ergonomics' ),
-					'referenceNote'   => __( 'Справочно: не влияет на индекс E и классификацию на сайте.', 'worldstat-ergonomics' ),
+					'referenceNote'   => __( 'Справочно: кластеры используются для нормализации внутри кластеров и влияют на индекс E и классификацию на сайте (после сохранения настроек).', 'worldstat-ergonomics' ),
 				],
 			]
 		);

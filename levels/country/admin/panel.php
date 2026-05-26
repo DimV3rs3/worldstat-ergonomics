@@ -227,7 +227,7 @@ $wsergo_scope_style = ! empty( $wsergo_scope_hidden ) ? ' style="display:none"' 
 					</table>
 					<hr />
 					<h3><?php esc_html_e( 'Признаки для k-means (макро)', 'worldstat-ergonomics' ); ?></h3>
-					<p class="description"><?php esc_html_e( 'Те же параметры, что в матрице критериев выше. Отметьте не меньше двух признаков для k-means. Кластеризация не участвует в расчёте индекса E, регрессии и классификации на сайте — только в этом блоке и в превью ниже.', 'worldstat-ergonomics' ); ?></p>
+					<p class="description"><?php esc_html_e( 'Те же параметры, что в матрице критериев выше. Отметьте не меньше двух признаков для k-means. Кластеризация используется для нормализации внутри кластеров при расчёте индекса E, регрессии и классификации на сайте — после сохранения настроек. В этом блоке и ниже вы видите превью по текущим выборкам.', 'worldstat-ergonomics' ); ?></p>
 					<p style="margin:.75em 0;">
 						<button type="button" class="button button-primary wsergo-auto-tune-clusters" data-scope="country"><?php esc_html_e( 'Автоподбор признаков и k', 'worldstat-ergonomics' ); ?></button>
 						<button type="button" class="button wsergo-auto-tune-clusters-save" data-scope="country"><?php esc_html_e( 'Автоподбор и сохранить', 'worldstat-ergonomics' ); ?></button>
@@ -303,7 +303,7 @@ $wsergo_scope_style = ! empty( $wsergo_scope_hidden ) ? ' style="display:none"' 
 							<th scope="row"><label for="wsergo_macro_k_clusters"><?php esc_html_e( 'Число кластеров k-means (макро)', 'worldstat-ergonomics' ); ?></label></th>
 							<td>
 								<input type="number" id="wsergo_macro_k_clusters" name="<?php echo esc_attr( WSErgo_Settings::OPTION_MACRO_K_CLUSTERS ); ?>" value="<?php echo esc_attr( (string) $macro_k ); ?>" class="small-text" min="2" max="12" step="1" />
-								<p class="description"><?php esc_html_e( 'Число кластеров для справочного разбиения и превью (не для индекса E).', 'worldstat-ergonomics' ); ?></p>
+								<p class="description"><?php esc_html_e( 'Число кластеров для нормализации внутри кластеров и для превью.', 'worldstat-ergonomics' ); ?></p>
 							</td>
 						</tr>
 						<tr>

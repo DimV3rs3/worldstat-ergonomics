@@ -25,14 +25,46 @@ class WSErgo_Macro_Cluster_Optimizer {
 	/** Сколько топ-признаков по CV участвуют в переборе. */
 	private const TUNE_TOP_CANDIDATES = 8;
 	/** Доля стран в одном кластере, выше — сильный штраф при автоподборе. */
-	private const MAX_DOMINANT_CLUSTER_SHARE = 0.55;
+	private const MAX_DOMINANT_CLUSTER_SHARE = 0.60;
 	/** Суммарная доля двух крупнейших кластеров, выше — штраф («два мешка»). */
 	private const MAX_TOP2_CLUSTER_SHARE = 0.72;
 	/** Минимальный размер «нормального» кластера (доля от n, не меньше 3 стран). */
 	private const MIN_CLUSTER_SIZE_FRAC = 0.025;
+	/** Жёсткий минимум размера кластера (чтобы не было кластеров < 10 стран). */
+	private const MIN_CLUSTER_SIZE_ABS = 10;
 
 	/** @var array<string, list<list<float>>> Кэш стандартизованных матриц по набору признаков. */
 	private static $scaled_matrix_cache = array();
+
+	/**
+	 * Проверка жёстких ограничений на форму разбиения.
+	 *
+	 * @param list<int> $counts
+	 */
+	private static function is_partition_valid( array $counts, int $n, int $k ): bool {
+		if ( $n < 1 || $k < 2 ) {
+			return false;
+		}
+		$non_empty = 0;
+		foreach ( $counts as $c ) {
+			if ( (int) $c > 0 ) {
+				++$non_empty;
+			}
+		}
+		if ( $non_empty < $k ) {
+			return false;
+		}
+		$max_c = (int) max( $counts );
+		$min_c = (int) min( $counts );
+		if ( $min_c < self::MIN_CLUSTER_SIZE_ABS ) {
+			return false;
+		}
+		$max_share = $max_c / (float) $n;
+		if ( $max_share > self::MAX_DOMINANT_CLUSTER_SHARE ) {
+			return false;
+		}
+		return true;
+	}
 
 	/**
 	 * @return array{
@@ -140,6 +172,21 @@ class WSErgo_Macro_Cluster_Optimizer {
 
 		$balance_note = '';
 		$labels       = self::kmeans_best_labels( $scaled, $k, self::KMEANS_RESTARTS_FINAL, false, count( $selected ) );
+		if ( empty( $labels ) ) {
+			// Если для выбранного k не нашлось валидного разбиения — пробуем соседние k.
+			$k_max_try = self::max_k_allowed( $matrix_n, count( $selected ) );
+			for ( $try = 2; $try <= $k_max_try; $try++ ) {
+				if ( $try === $k ) {
+					continue;
+				}
+				$trial = self::kmeans_best_labels( $scaled, $try, self::KMEANS_RESTARTS_FINAL, false, count( $selected ) );
+				if ( ! empty( $trial ) ) {
+					$k      = $try;
+					$labels = $trial;
+					break;
+				}
+			}
+		}
 		if ( ! empty( $labels ) ) {
 			$sil     = self::silhouette_avg( $scaled, $labels, $k );
 			$balance = self::cluster_balance_ratio( $labels, $k );
@@ -157,11 +204,14 @@ class WSErgo_Macro_Cluster_Optimizer {
 
 		$message = sprintf(
 			/* translators: 1: feature count, 2: k, 3: country count */
-			__( 'Подобрано %1$d признаков и k = %2$d по %3$d странам (признаки и k выбраны для наиболее различимых кластеров на карте/графике).', 'worldstat-ergonomics' ),
+			__( 'Подобрано %1$d признаков и k = %2$d по %3$d странам (признаки и k выбраны для наиболее различимых кластеров на карте/графике; ограничения: ≤60%% стран в крупнейшем кластере и ≥10 стран в каждом кластере).', 'worldstat-ergonomics' ),
 			count( $selected ),
 			$k,
 			$matrix_n
 		) . $balance_note;
+		if ( empty( $labels ) ) {
+			$message .= ' ' . __( 'Предупреждение: не удалось найти разбиение, удовлетворяющее ограничениям; попробуйте другой набор признаков или уменьшите k.', 'worldstat-ergonomics' );
+		}
 		if ( $partial_tune ) {
 			$message .= ' ' . sprintf(
 				/* translators: %d: recommended minimum country count */
@@ -324,7 +374,8 @@ class WSErgo_Macro_Cluster_Optimizer {
 		$d        = max( 2, $num_features );
 		$sqrt_cap = max( 3, (int) floor( sqrt( max( 4, $n ) ) / 1.35 ) );
 		$dim_cap  = 1 + (int) floor( 1.6 * $d );
-		return max( 2, min( 8, $sqrt_cap, $dim_cap, max( 2, $n - 1 ) ) );
+		$size_cap = (int) floor( $n / max( 1, self::MIN_CLUSTER_SIZE_ABS ) );
+		return max( 2, min( 8, $sqrt_cap, $dim_cap, max( 2, $n - 1 ), max( 2, $size_cap ) ) );
 	}
 
 	/**
@@ -413,7 +464,7 @@ class WSErgo_Macro_Cluster_Optimizer {
 	 */
 	private static function partition_shape_stats( array $counts, int $n ): array {
 		$n        = max( 1, $n );
-		$min_size = max( 3, (int) ceil( $n * self::MIN_CLUSTER_SIZE_FRAC ) );
+		$min_size = max( self::MIN_CLUSTER_SIZE_ABS, (int) ceil( $n * self::MIN_CLUSTER_SIZE_FRAC ) );
 		$micro    = 0;
 		$singletons = 0;
 		$effective  = 0;
@@ -578,6 +629,10 @@ class WSErgo_Macro_Cluster_Optimizer {
 			$labels = class_exists( 'WSErgo_Country_Macro_Calculator' )
 				? WSErgo_Country_Macro_Calculator::kmeans_labels_for_matrix( $X, $k, 50 )
 				: self::kmeans_legacy( $X, $k, 50 );
+			$counts = self::cluster_counts( $labels, $k );
+			if ( ! self::is_partition_valid( $counts, $n, $k ) ) {
+				continue;
+			}
 			$q      = $use_fast_score
 				? self::cluster_quality_score_fast( $X, $labels, $k, $num_features )
 				: self::cluster_quality_score( $X, $labels, $k, $num_features );
@@ -588,7 +643,8 @@ class WSErgo_Macro_Cluster_Optimizer {
 		}
 
 		if ( null === $best_labels ) {
-			return array_fill( 0, $n, 0 );
+			// Нет ни одного разбиения, удовлетворяющего жёстким ограничениям.
+			return array();
 		}
 		return $best_labels;
 	}
@@ -613,6 +669,10 @@ class WSErgo_Macro_Cluster_Optimizer {
 		$balance      = $min_c / max( 1, $max_c );
 		$shape        = self::partition_shape_stats( $counts, $n );
 
+		if ( ! self::is_partition_valid( $counts, $n, $k ) ) {
+			return -INF;
+		}
+
 		if ( $max_share > 0.85 ) {
 			return -1.0 + ( 1.0 - $max_share );
 		}
@@ -621,9 +681,6 @@ class WSErgo_Macro_Cluster_Optimizer {
 		$fit  = 1.0 / ( 1.0 + $wcss / max( 1.0, (float) $n ) );
 
 		$penalty = self::partition_shape_penalty( $counts, $n, $k, $num_features );
-		if ( $max_share > self::MAX_DOMINANT_CLUSTER_SHARE ) {
-			$penalty += ( $max_share - self::MAX_DOMINANT_CLUSTER_SHARE ) * 2.5;
-		}
 
 		$effective_bonus = min( 0.12, $shape['effective'] / max( 1.0, (float) $k ) * 0.12 );
 
@@ -647,6 +704,10 @@ class WSErgo_Macro_Cluster_Optimizer {
 		$max_c        = max( $counts );
 		$min_c        = min( $counts );
 		$max_share    = $max_c / (float) $n;
+		if ( ! self::is_partition_valid( $counts, $n, $k ) ) {
+			return -INF;
+		}
+
 		$non_empty    = 0;
 		foreach ( $counts as $cnt ) {
 			if ( $cnt > 0 ) {
@@ -666,9 +727,6 @@ class WSErgo_Macro_Cluster_Optimizer {
 		$shape   = self::partition_shape_stats( $counts, $n );
 
 		$penalty = self::partition_shape_penalty( $counts, $n, $k, $num_features );
-		if ( $max_share > self::MAX_DOMINANT_CLUSTER_SHARE ) {
-			$penalty += ( $max_share - self::MAX_DOMINANT_CLUSTER_SHARE ) * 3.0;
-		}
 		if ( $shape['singletons'] > 0 && $k >= 4 ) {
 			$penalty += 0.08 * $shape['singletons'];
 		}
@@ -798,7 +856,17 @@ class WSErgo_Macro_Cluster_Optimizer {
 		$fast_scores = array();
 		for ( $k = $k_min; $k <= $k_max; $k++ ) {
 			$labels = self::kmeans_best_labels( $X, $k, self::KMEANS_RESTARTS_PROBE, true, $num_features );
-			$fast_scores[ $k ] = self::cluster_quality_score_fast( $X, $labels, $k, $num_features );
+			if ( empty( $labels ) ) {
+				continue;
+			}
+			$q = self::cluster_quality_score_fast( $X, $labels, $k, $num_features );
+			if ( ! is_finite( $q ) ) {
+				continue;
+			}
+			$fast_scores[ $k ] = $q;
+		}
+		if ( empty( $fast_scores ) ) {
+			return $k_min;
 		}
 		arsort( $fast_scores, SORT_NUMERIC );
 		$finalists = array_slice( array_keys( $fast_scores ), 0, 3 );
@@ -807,11 +875,17 @@ class WSErgo_Macro_Cluster_Optimizer {
 		$best_q = -INF;
 		foreach ( $finalists as $k ) {
 			$labels = self::kmeans_best_labels( $X, $k, self::KMEANS_RESTARTS_FINAL, false, $num_features );
+			if ( empty( $labels ) ) {
+				continue;
+			}
 			$q      = self::cluster_quality_score( $X, $labels, $k, $num_features );
 			if ( $q > $best_q ) {
 				$best_q = $q;
 				$best_k = $k;
 			}
+		}
+		if ( ! is_finite( $best_q ) ) {
+			return $k_min;
 		}
 
 		return max( $k_min, $best_k );

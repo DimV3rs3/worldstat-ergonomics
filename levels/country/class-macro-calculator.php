@@ -1,8 +1,10 @@
 <?php
 /**
  * Индекс эргономичности страны по макроданным (CSV World Statistics Platform).
- * Страновой индекс по макроданным платформы: глобальная min–max нормализация для осей E и регрессии/классификации;
- * k-means — отдельно (диагностика и админ-превью), не влияет на индексы.
+ * Страновой индекс по макроданным платформы:
+ * - k-means: кластеризация стран по признакам (настройки k-means),
+ * - затем min–max нормализация нужных столбцов ВНУТРИ каждого кластера,
+ * - после чего считаются оси F–Ct, сводный E и дальше классификация/регрессия.
  *
  * @package WorldStatErgonomics
  */
@@ -23,10 +25,10 @@ class WSErgo_Country_Macro_Calculator {
 	private const TRANSIENT_KEY_CITY = 'wsergo_macro_city_scores_bundle_v1';
 
 	/** Инкремент при изменении логики расчёта — сбрасывает устаревший transient без смены CSV. */
-	private const SCORE_BUNDLE_LOGIC = 24;
+	private const SCORE_BUNDLE_LOGIC = 25;
 
 	/** Версия логики city-bundle (отдельно от странового свода). */
-	private const CITY_SCORE_BUNDLE_LOGIC = 3;
+	private const CITY_SCORE_BUNDLE_LOGIC = 4;
 
 	/** @var array<string, mixed>|null */
 	private static ?array $runtime_city_bundle = null;
@@ -1403,7 +1405,8 @@ class WSErgo_Country_Macro_Calculator {
 	}
 
 	/**
-	 * Сводка кластеризации для админки (не влияет на индекс E и классификацию).
+	 * Сводка кластеризации для админки (используется для нормализации внутри кластеров,
+	 * поэтому влияет на индекс E и классификацию на сайте после сохранения настроек).
 	 *
 	 * @return array{
 	 *   ok:bool,
@@ -1619,7 +1622,7 @@ class WSErgo_Country_Macro_Calculator {
 				(string) ( $min['profile'] ?? '' )
 			);
 		}
-		$insights[] = __( 'Кластеризация по CSV справочна и не меняет индекс E и классификацию на сайте.', 'worldstat-ergonomics' );
+		$insights[] = __( 'Кластеризация по CSV используется для нормализации внутри кластеров и влияет на индекс E и классификацию на сайте (после сохранения настроек).', 'worldstat-ergonomics' );
 		return $insights;
 	}
 
@@ -1982,7 +1985,7 @@ class WSErgo_Country_Macro_Calculator {
 				$iso3   = $keys[ $i ];
 				$vals[] = isset( $rows[ $iso3 ][ $col ] ) ? (float) $rows[ $iso3 ][ $col ] : NAN;
 			}
-			$norm_cols[ $col ] = self::normalize_global_minmax_1d( $vals );
+			$norm_cols[ $col ] = self::normalize_within_clusters_1d( $vals, $labels, $k );
 		}
 
 		if ( isset( $norm_cols['sustainable_cities'] ) ) {
@@ -2166,7 +2169,7 @@ class WSErgo_Country_Macro_Calculator {
 				$iso3   = $keys[ $i ];
 				$vals[] = isset( $rows[ $iso3 ][ $col ] ) ? (float) $rows[ $iso3 ][ $col ] : NAN;
 			}
-			$norm_cols[ $col ] = self::normalize_global_minmax_1d( $vals );
+			$norm_cols[ $col ] = self::normalize_within_clusters_1d( $vals, $labels, $k );
 		}
 
 		if ( isset( $norm_cols['sustainable_cities'] ) ) {
@@ -2434,7 +2437,7 @@ class WSErgo_Country_Macro_Calculator {
 	}
 
 	/**
-	 * @deprecated Используется только для справки; индексы считаются через {@see normalize_global_minmax_1d()}.
+	 * Min–max нормализация ОТДЕЛЬНО внутри каждого кластера (labels → бакеты 0..k-1).
 	 *
 	 * @param list<float> $values
 	 * @param list<int>   $labels
