@@ -1670,9 +1670,23 @@ class WSErgo_Country_Macro_Calculator {
 
 		$scaled = self::standard_scale_rows( $matrix );
 		$k      = max( 2, min( 12, $k, count( $scaled ) ) );
-		$labels = self::kmeans( $scaled, $k, 80 );
+		$labels = array();
 		if ( class_exists( 'WSErgo_Macro_Cluster_Optimizer' ) ) {
 			$labels = WSErgo_Macro_Cluster_Optimizer::best_cluster_labels( $scaled, $k );
+		}
+		if ( empty( $labels ) || count( $labels ) !== count( $scaled ) ) {
+			$labels = self::kmeans( $scaled, $k, 80 );
+			if ( class_exists( 'WSErgo_Macro_Cluster_Optimizer' )
+				&& ! WSErgo_Macro_Cluster_Optimizer::is_partition_valid_for_labels( $labels, $k ) ) {
+				return array(
+					'ok'      => false,
+					'message' => sprintf(
+						/* translators: %d: cluster count k */
+						__( 'Не удалось разбить страны на %d кластеров с ограничениями (в каждом ≥10 стран, крупнейший <60%%). Уменьшите k или смените признаки.', 'worldstat-ergonomics' ),
+						$k
+					),
+				);
+			}
 		}
 
 		return array(
@@ -1964,9 +1978,12 @@ class WSErgo_Country_Macro_Calculator {
 
 		$scaled = self::standard_scale_rows( $matrix );
 		$k      = min( WSErgo_Settings::get_macro_k_clusters(), count( $scaled ) );
-		$labels = self::kmeans( $scaled, $k, 80 );
+		$labels = array();
 		if ( class_exists( 'WSErgo_Macro_Cluster_Optimizer' ) ) {
 			$labels = WSErgo_Macro_Cluster_Optimizer::best_cluster_labels( $scaled, $k );
+		}
+		if ( empty( $labels ) || count( $labels ) !== count( $scaled ) ) {
+			$labels = self::kmeans( $scaled, $k, 80 );
 		}
 
 		$n = count( $keys );
@@ -2148,9 +2165,12 @@ class WSErgo_Country_Macro_Calculator {
 
 		$scaled = self::standard_scale_rows( $matrix );
 		$k      = min( WSErgo_Settings::get_city_macro_k_clusters(), count( $scaled ) );
-		$labels = self::kmeans( $scaled, $k, 80 );
+		$labels = array();
 		if ( class_exists( 'WSErgo_Macro_Cluster_Optimizer' ) ) {
 			$labels = WSErgo_Macro_Cluster_Optimizer::best_cluster_labels( $scaled, $k );
+		}
+		if ( empty( $labels ) || count( $labels ) !== count( $scaled ) ) {
+			$labels = self::kmeans( $scaled, $k, 80 );
 		}
 
 		$n = count( $keys );

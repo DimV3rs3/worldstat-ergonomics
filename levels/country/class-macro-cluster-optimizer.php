@@ -10,9 +10,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class WSErgo_Macro_Cluster_Optimizer {
 
-	/** Минимум признаков после автоподбора (2D + большое k даёт одиночки). */
+	/** Минимум признаков в жадном отборе (до полного перебора). */
 	private const MIN_FEATURES    = 4;
 	private const MAX_FEATURES    = 8;
+	/** Минимум признаков в комбинации при полном переборе. */
+	private const MIN_COMBO_FEATURES = 2;
+	/** Максимум признаков в одной комбинации при переборе. */
+	private const MAX_COMBO_FEATURES = 8;
+	/** Максимум признаков в пуле полного перебора (все комбинации 2…8 внутри пула). */
+	private const TUNE_POOL_MAX = 20;
 	/** Минимальная доля стран с числом по признаку (для отбора кандидатов). */
 	private const MIN_COVERAGE    = 0.20;
 	private const MAX_CORR        = 0.85;
@@ -22,8 +28,20 @@ class WSErgo_Macro_Cluster_Optimizer {
 	private const KMEANS_RESTARTS_FINAL = 3;
 	/** Перезапуски при переборе признаков / k (быстрая оценка без силуэта). */
 	private const KMEANS_RESTARTS_PROBE = 2;
-	/** Сколько топ-признаков по CV участвуют в переборе. */
+	/** Сколько топ-признаков участвуют в жадном отборе (до перебора комбинаций). */
+	private const TUNE_GREEDY_POOL = 28;
+	/** Сколько топ-признаков в пуле случайного автоподбора. */
 	private const TUNE_TOP_CANDIDATES = 28;
+	/** Лимит времени одной попытки случайного подбора (сек). */
+	private const TUNE_SEARCH_TIME_BUDGET_S = 8.0;
+	/** Случайных комбинаций за одну попытку. */
+	private const TUNE_RANDOM_TRIES = 120;
+	/** Макс. попыток автоподбора (неудачные — тихий перезапуск). */
+	private const TUNE_AUTO_TUNE_MAX_ATTEMPTS = 30;
+	/* Фоновый полный перебор (отключён):
+	private const TUNE_CHUNK_COMBOS = 40;
+	private const TUNE_JOB_TTL = 3600;
+	*/
 	/** Доля стран в одном кластере, выше — сильный штраф при автоподборе. */
 	private const MAX_DOMINANT_CLUSTER_SHARE = 0.60;
 	/** Суммарная доля двух крупнейших кластеров, выше — штраф («два мешка»). */
@@ -39,105 +57,303 @@ class WSErgo_Macro_Cluster_Optimizer {
 	private static $scaled_matrix_cache = array();
 
 	/**
-	 * Быстрый поиск валидной пары (features,k) под жёсткие ограничения.
+	 * @param list<string> $features
+	 */
+	private static function features_are_uncorrelated( array $rows, array $features ): bool {
+		$c = count( $features );
+		for ( $i = 0; $i < $c; $i++ ) {
+			for ( $j = $i + 1; $j < $c; $j++ ) {
+				$r = self::pearson_correlation( $rows, $features[ $i ], $features[ $j ] );
+				if ( is_finite( $r ) && abs( $r ) > self::MAX_CORR ) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Оценка одного набора признаков для k (возвращает quality или null).
+	 *
+	 * @param list<string> $features
+	 */
+	private static function score_feature_set_for_k( array $rows, array $features, int $k ): ?float {
+		$d = count( $features );
+		if ( $d < self::MIN_COMBO_FEATURES ) {
+			return null;
+		}
+		$X = self::get_scaled_matrix_for_features( $rows, $features );
+		if ( null === $X ) {
+			return null;
+		}
+		$n = count( $X );
+		$labels = self::kmeans_best_labels( $X, $k, self::KMEANS_RESTARTS_PROBE, true, $d );
+		if ( empty( $labels ) ) {
+			return null;
+		}
+		$q = self::cluster_quality_score_fast( $X, $labels, $k, $d );
+		if ( ! is_finite( $q ) ) {
+			return null;
+		}
+		$counts    = self::cluster_counts( $labels, $k );
+		$max_c     = (int) max( $counts );
+		$min_c     = (int) min( $counts );
+		$balance   = $min_c / max( 1, $max_c );
+		$max_share = $max_c / (float) max( 1, $n );
+		$q        += $balance * 0.18 + ( 1.0 - $max_share ) * 0.10;
+		$q        += max( 0, $d - self::MIN_COMBO_FEATURES ) * 0.012;
+		return $q;
+	}
+
+	/**
+	 * @param list<string> $features
+	 * @param array{features:list<string>,k:int,quality:float}|null $best
+	 */
+	private static function try_combo_for_best( array $rows, array $features, ?array &$best, float &$best_q ): void {
+		if ( count( $features ) < self::MIN_FEATURES || ! self::features_are_uncorrelated( $rows, $features ) ) {
+			return;
+		}
+		$d = count( $features );
+		$X = self::get_scaled_matrix_for_features( $rows, $features );
+		if ( null === $X ) {
+			return;
+		}
+		$n     = count( $X );
+		$k_max = self::max_k_allowed( $n, $d );
+		for ( $k = self::MIN_K_AUTOTUNE; $k <= $k_max; $k++ ) {
+			$q = self::score_feature_set_for_k( $rows, $features, $k );
+			if ( null === $q || $q <= $best_q ) {
+				continue;
+			}
+			$best_q = $q;
+			$best   = array(
+				'features' => array_values( $features ),
+				'k'        => (int) $k,
+				'quality'  => $q,
+			);
+		}
+	}
+
+	/**
+	 * Случайный поиск валидной пары (features, k) под жёсткие ограничения.
 	 *
 	 * @param array<string, array<string, float>> $rows
 	 * @param array<string, array{cv:float,coverage:float,std:float,score:float}> $scored
 	 * @return array{features:list<string>,k:int,quality:float}|null
 	 */
-	private static function search_best_valid_solution_fast( array $rows, array $scored ): ?array {
+	private static function search_best_valid_solution_random( array $rows, array $scored ): ?array {
 		$start_ts = microtime( true );
-		$time_budget_s = 6.5;
 
-		$pool = array_slice( array_keys( $scored ), 0, max( self::TUNE_TOP_CANDIDATES, self::MIN_FEATURES ) );
+		uasort(
+			$scored,
+			static function ( array $a, array $b ): int {
+				return ( $b['score'] <=> $a['score'] );
+			}
+		);
+		$pool = array_slice( array_keys( $scored ), 0, self::TUNE_TOP_CANDIDATES );
 		$pool = array_values( array_unique( array_map( 'sanitize_key', $pool ) ) );
 		if ( count( $pool ) < self::MIN_FEATURES ) {
 			return null;
 		}
 
-		$candidates = array();
-		$seed = self::select_features_for_separation( $rows, $scored );
-		if ( count( $seed ) >= self::MIN_FEATURES ) {
-			$candidates[] = $seed;
-		}
-		$alt = self::select_uncorrelated_features( $rows, $scored );
-		if ( count( $alt ) >= self::MIN_FEATURES ) {
-			$candidates[] = $alt;
-		}
+		$best   = null;
+		$best_q = -INF;
 
-		$tries = 120;
-		for ( $t = 0; $t < $tries; $t++ ) {
-			if ( microtime( true ) - $start_ts > $time_budget_s ) {
+		self::try_combo_for_best( $rows, self::select_features_for_separation( $rows, $scored ), $best, $best_q );
+		self::try_combo_for_best( $rows, self::select_uncorrelated_features( $rows, $scored ), $best, $best_q );
+
+		for ( $t = 0; $t < self::TUNE_RANDOM_TRIES; $t++ ) {
+			if ( microtime( true ) - $start_ts > self::TUNE_SEARCH_TIME_BUDGET_S ) {
 				break;
 			}
 			$want = random_int( self::MIN_FEATURES, min( self::MAX_FEATURES, count( $pool ) ) );
 			$tmp  = $pool;
 			shuffle( $tmp );
-			$set = array_slice( $tmp, 0, $want );
+			$set = array_values( array_slice( $tmp, 0, $want ) );
 			sort( $set );
-			$candidates[] = $set;
-		}
-
-		$best   = null;
-		$best_q = -INF;
-
-		foreach ( $candidates as $features ) {
-			if ( microtime( true ) - $start_ts > $time_budget_s ) {
-				break;
-			}
-			$d = count( $features );
-			if ( $d < self::MIN_FEATURES ) {
-				continue;
-			}
-			$X = self::get_scaled_matrix_for_features( $rows, $features );
-			if ( null === $X ) {
-				continue;
-			}
-			$n = count( $X );
-			$k_target = self::MIN_K_AUTOTUNE; // сейчас жёстко хотим k=4 как базовый сценарий.
-			$k_max    = self::max_k_allowed( $n, $d );
-			$k_list   = array( $k_target );
-			for ( $kk = $k_target + 1; $kk <= $k_max; $kk++ ) {
-				$k_list[] = $kk;
-			}
-
-			foreach ( $k_list as $k ) {
-				if ( microtime( true ) - $start_ts > $time_budget_s ) {
-					break;
-				}
-				$labels = self::kmeans_best_labels( $X, $k, 1, true, $d );
-				if ( empty( $labels ) ) {
-					continue;
-				}
-				$q = self::cluster_quality_score_fast( $X, $labels, $k, $d );
-				if ( ! is_finite( $q ) ) {
-					continue;
-				}
-
-				$counts = self::cluster_counts( $labels, $k );
-				$max_c  = (int) max( $counts );
-				$min_c  = (int) min( $counts );
-				$balance = $min_c / max( 1, $max_c );
-				$max_share = $max_c / (float) max( 1, $n );
-
-				// Усиливаем цель «примерно равномерно», но не стерильно:
-				// - стимулируем баланс,
-				// - слегка штрафуем за слишком «стерильную» равномерность только когда fit плохой.
-				$q += $balance * 0.18 + ( 1.0 - $max_share ) * 0.10;
-				$q += max( 0, $d - self::MIN_FEATURES ) * 0.012;
-
-				if ( $q > $best_q ) {
-					$best_q = $q;
-					$best   = array(
-						'features' => array_values( $features ),
-						'k'        => (int) $k,
-						'quality'  => $q,
-					);
-				}
-			}
+			self::try_combo_for_best( $rows, $set, $best, $best_q );
 		}
 
 		return $best;
+	}
+
+	/**
+	 * @return array{ok:bool,rows?:array,scored?:array,partial?:bool,message?:string,pool_note?:string}
+	 */
+	private static function load_tune_context( string $scope ): array {
+		$scope = ( 'city' === $scope ) ? 'city' : 'country';
+		if ( ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			return array(
+				'ok'      => false,
+				'message' => __( 'Калькулятор макроданных недоступен.', 'worldstat-ergonomics' ),
+			);
+		}
+
+		$bundle = ( 'city' === $scope )
+			? WSErgo_Country_Macro_Calculator::get_city_full_bundle()
+			: WSErgo_Country_Macro_Calculator::get_full_bundle();
+
+		$rows = isset( $bundle['raw_rows'] ) && is_array( $bundle['raw_rows'] ) ? $bundle['raw_rows'] : array();
+		$n    = count( $rows );
+
+		$allowlist = WSErgo_Country_Macro_Calculator::macro_cluster_signal_allowlist( $scope );
+		if ( count( $allowlist ) < self::MIN_COMBO_FEATURES ) {
+			return array(
+				'ok'      => false,
+				'message' => __( 'Нет параметров из CSV для автоподбора. Загрузите данные в World Statistics и обновите страницу.', 'worldstat-ergonomics' ),
+			);
+		}
+
+		if ( $n < self::MIN_COUNTRIES ) {
+			return array(
+				'ok'      => false,
+				'message' => sprintf(
+					/* translators: %d: minimum country count */
+					__( 'Недостаточно стран с данными в CSV для автоподбора (нужно ≥%d).', 'worldstat-ergonomics' ),
+					self::MIN_COUNTRIES
+				),
+			);
+		}
+
+		$candidates = array_values( array_unique( array_map( 'sanitize_key', $allowlist ) ) );
+		$scored     = self::score_features( $rows, $candidates );
+		if ( count( $scored ) < self::MIN_COMBO_FEATURES && class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+			$fallback = WSErgo_Country_Macro_Calculator::fallback_cluster_features_from_rows( $rows, $candidates );
+			if ( count( $fallback ) >= self::MIN_COMBO_FEATURES ) {
+				$scored = self::score_features( $rows, $fallback );
+				if ( count( $scored ) < self::MIN_COMBO_FEATURES ) {
+					foreach ( $fallback as $sig ) {
+						if ( ! isset( $scored[ $sig ] ) ) {
+							$scored[ $sig ] = array(
+								'cv'       => 0.0,
+								'coverage' => 0.25,
+								'std'      => 1.0,
+								'score'    => 0.0,
+							);
+						}
+					}
+				}
+			}
+		}
+		if ( count( $scored ) < self::MIN_COMBO_FEATURES ) {
+			return array(
+				'ok'      => false,
+				'message' => __( 'В загруженных CSV нет достаточного числа числовых показателей для автоподбора. Проверьте опорный год и состав файлов.', 'worldstat-ergonomics' ),
+			);
+		}
+
+		uasort(
+			$scored,
+			static function ( array $a, array $b ): int {
+				return ( $b['score'] <=> $a['score'] );
+			}
+		);
+
+		$pool_all = array_values( array_unique( array_map( 'sanitize_key', array_keys( $scored ) ) ) );
+		$pool_note = '';
+		if ( count( $pool_all ) > self::TUNE_POOL_MAX ) {
+			$pool_note = sprintf(
+				/* translators: 1: pool size, 2: total scored features */
+				__( ' (перебор по топ-%1$d из %2$d признаков)', 'worldstat-ergonomics' ),
+				self::TUNE_POOL_MAX,
+				count( $pool_all )
+			);
+			$pool_all = array_slice( $pool_all, 0, self::TUNE_POOL_MAX );
+		}
+
+		return array(
+			'ok'          => true,
+			'rows'        => $rows,
+			'scored'      => $scored,
+			'pool'        => $pool_all,
+			'partial'     => $n < self::IDEAL_COUNTRIES,
+			'pool_note'   => $pool_note,
+		);
+	}
+
+	// Фоновый полный перебор комбинаций отключён (ранее: start_background_tune_job / process_background_tune_job).
+
+	/**
+	 * @param array<string, mixed> $job
+	 * @param array<string, array<string, float>> $rows
+	 * @param array<string, array{cv:float,coverage:float,std:float,score:float}> $scored
+	 * @param array<string, mixed> $ctx
+	 * @return array<string, mixed>
+	 */
+	private static function finalize_tune_from_job( array $job, array $rows, array $scored, array $ctx ): array {
+		$best     = $job['best'];
+		$selected = is_array( $best ) ? (array) ( $best['features'] ?? array() ) : array();
+		$k        = is_array( $best ) ? (int) ( $best['k'] ?? self::MIN_K_AUTOTUNE ) : self::MIN_K_AUTOTUNE;
+
+		$matrix   = self::build_matrix_imputed( $rows, $selected );
+		$matrix_n = count( $matrix );
+		if ( $matrix_n < self::MIN_COUNTRIES ) {
+			$matrix   = self::build_matrix( $rows, $selected );
+			$matrix_n = count( $matrix );
+		}
+
+		$scaled = self::standard_scale_rows( $matrix );
+		$report = self::build_feature_report( $scored, $selected );
+
+		$balance_note = '';
+		$labels       = self::kmeans_best_labels( $scaled, $k, self::KMEANS_RESTARTS_FINAL, false, count( $selected ) );
+		if ( ! empty( $labels ) ) {
+			$sil     = self::silhouette_avg( $scaled, $labels, $k );
+			$balance = self::cluster_balance_ratio( $labels, $k );
+			$counts  = self::cluster_counts( $labels, $k );
+			$shape   = self::partition_shape_stats( $counts, count( $labels ) );
+			$balance_note = sprintf(
+				/* translators: 1: silhouette, 2: balance %%, 3: effective clusters, 4: top-2 share %% */
+				__( ' Наглядность: силуэт %1$s, равномерность %2$s%%, содержательных кластеров %3$d, две крупнейшие — %4$s%% стран.', 'worldstat-ergonomics' ),
+				(string) round( $sil, 2 ),
+				(string) round( $balance * 100.0, 0 ),
+				(int) $shape['effective'],
+				(string) round( $shape['top2_share'] * 100.0, 0 )
+			);
+		}
+
+		$partial_tune = ! empty( $job['partial_tune'] );
+		$pool_note    = (string) ( $job['pool_note'] ?? '' );
+
+		$message = sprintf(
+			/* translators: 1: feature count, 2: k, 3: country count */
+			__( 'Подобрано %1$d признаков и k = %2$d по %3$d странам (ограничения: ≤60%% в крупнейшем кластере, ≥10 в каждом, k ≥ %4$d).', 'worldstat-ergonomics' ),
+			count( $selected ),
+			$k,
+			$matrix_n,
+			self::MIN_K_AUTOTUNE
+		) . $pool_note . $balance_note;
+
+		if ( $partial_tune ) {
+			$message .= ' ' . sprintf(
+				/* translators: %d: recommended minimum country count */
+				__( '(Для надёжного подбора желательно ≥%d стран.)', 'worldstat-ergonomics' ),
+				self::IDEAL_COUNTRIES
+			);
+		}
+
+		return array(
+			'ok'             => true,
+			'features'       => array_values( $selected ),
+			'k'              => $k,
+			'message'        => $message,
+			'feature_report' => $report,
+			'countries_used' => $matrix_n,
+			'partial'        => $partial_tune,
+		);
+	}
+
+	/**
+	 * Проверка жёстких ограничений на форму разбиения (публично — для превью и расчёта).
+	 *
+	 * @param list<int> $labels
+	 */
+	public static function is_partition_valid_for_labels( array $labels, int $k ): bool {
+		$n = count( $labels );
+		if ( $n < 1 ) {
+			return false;
+		}
+		return self::is_partition_valid( self::cluster_counts( $labels, $k ), $n, $k );
 	}
 
 	/**
@@ -181,158 +397,37 @@ class WSErgo_Macro_Cluster_Optimizer {
 	 */
 	public static function auto_tune( string $scope = 'country' ): array {
 		if ( function_exists( 'set_time_limit' ) ) {
-			@set_time_limit( 90 );
+			@set_time_limit( 300 );
 		}
-		self::clear_tune_cache();
 
 		$scope = ( 'city' === $scope ) ? 'city' : 'country';
-		if ( ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
-			return array(
-				'ok'      => false,
-				'message' => __( 'Калькулятор макроданных недоступен.', 'worldstat-ergonomics' ),
-			);
-		}
 
-		$bundle = ( 'city' === $scope )
-			? WSErgo_Country_Macro_Calculator::get_city_full_bundle()
-			: WSErgo_Country_Macro_Calculator::get_full_bundle();
-
-		$rows = isset( $bundle['raw_rows'] ) && is_array( $bundle['raw_rows'] ) ? $bundle['raw_rows'] : array();
-		$n    = count( $rows );
-
-		$allowlist = WSErgo_Country_Macro_Calculator::macro_cluster_signal_allowlist( $scope );
-		if ( count( $allowlist ) < 2 ) {
-			return array(
-				'ok'      => false,
-				'message' => __( 'Нет параметров из CSV для автоподбора. Загрузите данные в World Statistics и обновите страницу.', 'worldstat-ergonomics' ),
-			);
-		}
-
-		if ( $n < self::MIN_COUNTRIES ) {
-			return array(
-				'ok'      => false,
-				'message' => sprintf(
-					/* translators: %d: minimum country count */
-					__( 'Недостаточно стран с данными в CSV для автоподбора (нужно ≥%d).', 'worldstat-ergonomics' ),
-					self::MIN_COUNTRIES
-				),
-			);
-		}
-
-		$partial_tune = $n < self::IDEAL_COUNTRIES;
-		$candidates   = array_values( array_unique( array_map( 'sanitize_key', $allowlist ) ) );
-
-		$scored = self::score_features( $rows, $candidates );
-		if ( count( $scored ) < 2 && class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
-			$fallback = WSErgo_Country_Macro_Calculator::fallback_cluster_features_from_rows( $rows, $candidates );
-			if ( count( $fallback ) >= 2 ) {
-				$scored = self::score_features( $rows, $fallback );
-				if ( count( $scored ) < 2 ) {
-					foreach ( $fallback as $sig ) {
-						if ( ! isset( $scored[ $sig ] ) ) {
-							$scored[ $sig ] = array(
-								'cv'       => 0.0,
-								'coverage' => 0.25,
-								'std'      => 1.0,
-								'score'    => 0.0,
-							);
-						}
-					}
-				}
+		for ( $attempt = 0; $attempt < self::TUNE_AUTO_TUNE_MAX_ATTEMPTS; $attempt++ ) {
+			self::clear_tune_cache();
+			$ctx = self::load_tune_context( $scope );
+			if ( empty( $ctx['ok'] ) ) {
+				return array(
+					'ok'      => false,
+					'message' => (string) ( $ctx['message'] ?? __( 'Ошибка подготовки автоподбора.', 'worldstat-ergonomics' ) ),
+				);
 			}
-		}
-		if ( count( $scored ) < 2 ) {
-			return array(
-				'ok'      => false,
-				'message' => __( 'В загруженных CSV нет достаточного числа числовых показателей для автоподбора. Проверьте опорный год и состав файлов.', 'worldstat-ergonomics' ),
-			);
-		}
 
-		$solution = self::search_best_valid_solution_fast( $rows, $scored );
-		if ( null === $solution ) {
-			return array(
-				'ok'      => false,
-				'message' => __( 'Автоподбор не нашёл разбиение, удовлетворяющее ограничениям (k ≥ 4, крупнейший кластер < 60%, каждый кластер ≥ 10 стран). Попробуйте другой год/набор признаков или отметьте признаки вручную.', 'worldstat-ergonomics' ),
-			);
-		}
-
-		$selected = $solution['features'];
-		$k        = (int) $solution['k'];
-
-		$matrix   = self::build_matrix_imputed( $rows, $selected );
-		$matrix_n = count( $matrix );
-		if ( $matrix_n < self::MIN_COUNTRIES ) {
-			$matrix   = self::build_matrix( $rows, $selected );
-			$matrix_n = count( $matrix );
-		}
-		if ( $matrix_n < self::MIN_COUNTRIES ) {
-			return array(
-				'ok'      => false,
-				'message' => __( 'Слишком много пропусков в выбранных признаках. Отметьте другие параметры вручную или дополните CSV.', 'worldstat-ergonomics' ),
-			);
-		}
-
-		$scaled = self::standard_scale_rows( $matrix );
-		$report = self::build_feature_report( $scored, $selected );
-
-		$balance_note = '';
-		$labels       = self::kmeans_best_labels( $scaled, $k, self::KMEANS_RESTARTS_FINAL, false, count( $selected ) );
-		if ( empty( $labels ) ) {
-			// Если для выбранного k не нашлось валидного разбиения — пробуем соседние k.
-			$k_max_try = self::max_k_allowed( $matrix_n, count( $selected ) );
-			for ( $try = self::MIN_K_AUTOTUNE; $try <= $k_max_try; $try++ ) {
-				if ( $try === $k ) {
-					continue;
-				}
-				$trial = self::kmeans_best_labels( $scaled, $try, self::KMEANS_RESTARTS_FINAL, false, count( $selected ) );
-				if ( ! empty( $trial ) ) {
-					$k      = $try;
-					$labels = $trial;
-					break;
-				}
+			$solution = self::search_best_valid_solution_random( $ctx['rows'], $ctx['scored'] );
+			if ( null === $solution ) {
+				continue;
 			}
-		}
-		if ( ! empty( $labels ) ) {
-			$sil     = self::silhouette_avg( $scaled, $labels, $k );
-			$balance = self::cluster_balance_ratio( $labels, $k );
-			$counts = self::cluster_counts( $labels, $k );
-			$shape  = self::partition_shape_stats( $counts, count( $labels ) );
-			$balance_note = sprintf(
-				/* translators: 1: silhouette, 2: balance %%, 3: effective clusters, 4: top-2 share %% */
-				__( ' Наглядность: силуэт %1$s, равномерность %2$s%%, содержательных кластеров %3$d, две крупнейшие — %4$s%% стран.', 'worldstat-ergonomics' ),
-				(string) round( $sil, 2 ),
-				(string) round( $balance * 100.0, 0 ),
-				(int) $shape['effective'],
-				(string) round( $shape['top2_share'] * 100.0, 0 )
-			);
-		}
 
-		$message = sprintf(
-			/* translators: 1: feature count, 2: k, 3: country count */
-			__( 'Подобрано %1$d признаков и k = %2$d по %3$d странам (признаки и k выбраны для наиболее различимых кластеров на карте/графике; ограничения: ≤60%% стран в крупнейшем кластере и ≥10 стран в каждом кластере).', 'worldstat-ergonomics' ),
-			count( $selected ),
-			$k,
-			$matrix_n
-		) . $balance_note;
-		if ( empty( $labels ) ) {
-			$message .= ' ' . __( 'Предупреждение: на финальном шаге k-means не удалось воспроизвести валидное разбиение (редко). Нажмите «Автоподбор» ещё раз.', 'worldstat-ergonomics' );
-		}
-		if ( $partial_tune ) {
-			$message .= ' ' . sprintf(
-				/* translators: %d: recommended minimum country count */
-				__( '(Для надёжного подбора желательно ≥%d стран.)', 'worldstat-ergonomics' ),
-				self::IDEAL_COUNTRIES
+			$job = array(
+				'best'         => $solution,
+				'partial_tune' => ! empty( $ctx['partial'] ),
+				'pool_note'    => '',
 			);
+			return self::finalize_tune_from_job( $job, $ctx['rows'], $ctx['scored'], $ctx );
 		}
 
 		return array(
-			'ok'             => true,
-			'features'       => array_values( $selected ),
-			'k'              => $k,
-			'message'        => $message,
-			'feature_report' => $report,
-			'countries_used' => $matrix_n,
-			'partial'        => $partial_tune,
+			'ok'      => false,
+			'message' => __( 'Автоподбор не нашёл разбиение (k ≥ 4, крупнейший кластер < 60%, каждый кластер ≥ 10 стран). Попробуйте другой год или отметьте признаки вручную.', 'worldstat-ergonomics' ),
 		);
 	}
 
@@ -635,7 +730,7 @@ class WSErgo_Macro_Cluster_Optimizer {
 			return array();
 		}
 
-		$top_n = min( self::TUNE_TOP_CANDIDATES, count( $candidates ) );
+		$top_n = min( self::TUNE_GREEDY_POOL, count( $candidates ) );
 		$pool  = array_slice( $candidates, 0, $top_n );
 
 		$seed_target = min( self::MIN_FEATURES, count( $pool ), self::MAX_FEATURES );
@@ -1326,13 +1421,36 @@ class WSErgo_Macro_Cluster_Optimizer {
 	 * @param list<string> $features
 	 */
 	/**
-	 * Лучшее разбиение k-means++ из нескольких перезапусков (для превью и расчёта).
+	 * Лучшее разбиение k-means++ с жёсткими ограничениями (для превью и расчёта на сайте).
 	 *
 	 * @param list<list<float>> $X стандартизованная матрица
-	 * @return list<int>
+	 * @return list<int> пустой массив, если валидное разбиение не найдено
 	 */
 	public static function best_cluster_labels( array $X, int $k ): array {
-		return self::kmeans_best_labels( $X, $k, self::KMEANS_RESTARTS_FINAL, true );
+		$n = count( $X );
+		if ( $n < 2 ) {
+			return array();
+		}
+		$k = max( self::MIN_K_AUTOTUNE, min( $k, $n ) );
+		$d = count( $X[0] ?? array() );
+
+		$labels = self::kmeans_best_labels( $X, $k, 25, true, $d );
+		if ( ! empty( $labels ) ) {
+			return $labels;
+		}
+
+		// Дополнительные перезапуски без раннего отсечения по скору (только валидатор).
+		for ( $r = 0; $r < 60; $r++ ) {
+			if ( ! class_exists( 'WSErgo_Country_Macro_Calculator' ) ) {
+				break;
+			}
+			$trial = WSErgo_Country_Macro_Calculator::kmeans_labels_for_matrix( $X, $k, 50 );
+			if ( self::is_partition_valid_for_labels( $trial, $k ) ) {
+				return $trial;
+			}
+		}
+
+		return array();
 	}
 
 	/**

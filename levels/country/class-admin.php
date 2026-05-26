@@ -178,7 +178,7 @@ class WSErgo_Country_Admin {
 		$url_viz     = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::url( 'country', $js_viz ) : WSERGO_URL . 'levels/country/' . $js_viz;
 		$url_css_viz = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::url( 'country', $css_viz ) : WSERGO_URL . 'levels/country/' . $css_viz;
 		$ver_country = class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $js_country ) : WSERGO_VERSION;
-		$ver_tune    = ( class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $js_tune ) : WSERGO_VERSION ) . '-tune5';
+		$ver_tune    = ( class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $js_tune ) : WSERGO_VERSION ) . '-tune9';
 		$ver_viz     = ( class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $js_viz ) : WSERGO_VERSION ) . '-legend1';
 		$ver_css_viz = ( class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $css_viz ) : WSERGO_VERSION ) . '-iso3ru1';
 
@@ -220,7 +220,7 @@ class WSErgo_Country_Admin {
 				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 				'nonce'   => wp_create_nonce( 'wsergo_admin' ),
 				'i18n'    => [
-					'running'   => __( 'Анализ данных и подбор параметров (обычно 15–40 с)…', 'worldstat-ergonomics' ),
+					'running'   => __( 'Анализ данных и подбор параметров (обычно 10 с – 5 мин)…', 'worldstat-ergonomics' ),
 					'done'      => __( 'Параметры применены к форме. Нажмите «Сохранить настройки» внизу страницы.', 'worldstat-ergonomics' ),
 					'saved'     => __( 'Параметры сохранены, кэш пересчёта сброшен.', 'worldstat-ergonomics' ),
 					'error'     => __( 'Не удалось выполнить автоподбор.', 'worldstat-ergonomics' ),

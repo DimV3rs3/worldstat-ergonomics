@@ -87,16 +87,21 @@ function wsergo_country_ajax_auto_tune_macro_clusters(): void {
 	}
 	$scope = isset( $_POST['scope'] ) && (string) wp_unslash( $_POST['scope'] ) === 'city' ? 'city' : 'country';
 	$apply = ! empty( $_POST['apply'] );
+
 	try {
 		$result = WSErgo_Macro_Cluster_Optimizer::auto_tune( $scope );
 	} catch ( Throwable $e ) {
 		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-			error_log( 'wsergo_auto_tune_macro_clusters: ' . $e->getMessage() );
+			error_log( 'wsergo_auto_tune_macro_clusters: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine() );
 		}
 		wsergo_country_discard_ajax_output_buffer();
+		$msg = __( 'Ошибка при автоподборе. Проверьте debug.log на сервере.', 'worldstat-ergonomics' );
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG && defined( 'WP_DEBUG_DISPLAY' ) && WP_DEBUG_DISPLAY ) {
+			$msg .= ' (' . $e->getMessage() . ')';
+		}
 		wp_send_json_error(
 			[
-				'message' => __( 'Ошибка при автоподборе. Проверьте debug.log на сервере.', 'worldstat-ergonomics' ),
+				'message' => $msg,
 			]
 		);
 	}
