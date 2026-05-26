@@ -218,7 +218,10 @@
 			return;
 		}
 		var cls = 'wsergo-compare-analysis' + (extraClass ? ' ' + extraClass : '');
-		var title = (extraClass && extraClass.indexOf('ergo') >= 0)
+		// NOTE: do not detect by substring "ergo" because "wsergo" contains it.
+		// We only want the ergonomics title for the explicit ergo analysis block.
+		var isErgo = !!(extraClass && /(^|\s)wsergo-compare-analysis--ergo(\s|$)/.test(extraClass));
+		var title = isErgo
 			? i18n('ergoAnalysisTitle', 'Классификация эргономичности')
 			: i18n('analysisTitle', 'Аналитический вывод по показателю');
 		var html = '<article class="' + cls + '">';
@@ -340,9 +343,9 @@
 
 		renderViewToolbar($res, viewMode);
 		renderAnalysis($res, data.analysis || {}, 'wsergo-compare-analysis--trend');
-		if (data.ergo_analysis) {
-			renderAnalysis($res, data.ergo_analysis, 'wsergo-compare-analysis--ergo');
-		}
+		// Ergonomics classification analysis is already shown above the regression block
+		// (under the country classification table) and auto-updates on selection change.
+		// Duplicating it here inside regression results is confusing.
 
 		var keys = [];
 		if (viewMode === 'separate') {
