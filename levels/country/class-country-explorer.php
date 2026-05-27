@@ -53,8 +53,9 @@ class WSErgo_Country_Explorer {
 			'error'         => __( 'Ошибка', 'worldstat-ergonomics' ),
 			'networkError'  => __( 'Ошибка сети. Попробуйте снова.', 'worldstat-ergonomics' ),
 			'ladderTitle'   => __( 'Шкалы классификации по критериям', 'worldstat-ergonomics' ),
+			'radarTitle'    => __( 'Радарная диаграмма по критериям', 'worldstat-ergonomics' ),
 			'ladderHint'    => __( 'Шкала 0–100: цвет точки — уровень по оси; наведите — страна и балл.', 'worldstat-ergonomics' ),
-			'ladderHintErgo' => __( 'Шкала 0–100: одна точка на оси — балл этой страны; цвет — уровень по критерию.', 'worldstat-ergonomics' ),
+			'ladderHintErgo' => __( 'Лучи из центра — шесть критериев F, Cm, H, A, S, Ct (0–100). Цвет вершины — уровень по критерию; заливка — профиль страны.', 'worldstat-ergonomics' ),
 			'scoreLabel'    => __( 'Балл', 'worldstat-ergonomics' ),
 			'levelLabel'    => __( 'Уровень', 'worldstat-ergonomics' ),
 			'scatterTitle'  => __( 'Положение страны по двум осям', 'worldstat-ergonomics' ),
@@ -230,9 +231,26 @@ class WSErgo_Country_Explorer {
 			);
 		}
 
+		$country_tier = array(
+			'slug'  => '',
+			'label' => '',
+			'color' => '#2563eb',
+		);
+		if ( class_exists( 'WSErgo_Tier_Classifier' ) ) {
+			$tier_row = WSErgo_Tier_Classifier::get_tier_for_iso2( $iso2 );
+			if ( is_array( $tier_row ) ) {
+				$country_tier = array(
+					'slug'  => sanitize_key( (string) ( $tier_row['slug'] ?? '' ) ),
+					'label' => (string) ( $tier_row['label'] ?? '' ),
+					'color' => (string) ( $tier_row['color'] ?? '#2563eb' ),
+				);
+			}
+		}
+
 		return array(
 			'highlight_iso2'        => $iso2,
 			'ladder_single_country' => true,
+			'country_tier'          => $country_tier,
 			'ladder_chart'          => class_exists( 'WSErgo_Tier_Classifier' )
 				? WSErgo_Tier_Classifier::build_axis_ladder_chart_payload( $iso2, true )
 				: array(),

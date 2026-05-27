@@ -515,6 +515,86 @@
 
 .wsergo-country-classification-summary .wsergo-cls-ladder-wrap {
 	margin-bottom: 1rem;
+	position: relative;
+}
+
+/* Радарная диаграмма (вкладка «Эргономичность») */
+.wsergo-cls-radar__title {
+	margin: 0 0 6px;
+	font-size: 15px;
+	font-weight: 600;
+}
+
+.wsergo-cls-radar__hint {
+	margin: 0 0 10px;
+	font-size: 13px;
+}
+
+.wsergo-cls-radar__chart {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	padding: 8px 0 4px;
+	max-width: 100%;
+	overflow: visible;
+}
+
+.wsergo-cls-radar__svg {
+	width: min(100%, 440px);
+	height: auto;
+	display: block;
+}
+
+.wsergo-cls-radar__ring {
+	stroke: #e2e8f0;
+	stroke-width: 1;
+}
+
+.wsergo-cls-radar__spoke {
+	stroke: #cbd5e1;
+	stroke-width: 1;
+}
+
+.wsergo-cls-radar__tick {
+	font-size: 10px;
+	fill: #94a3b8;
+	font-variant-numeric: tabular-nums;
+}
+
+.wsergo-cls-radar__area {
+	fill: color-mix(in srgb, var(--wsergo-radar-tier-color, #2563eb) 22%, transparent);
+	stroke: var(--wsergo-radar-tier-color, #2563eb);
+	stroke-width: 2.5;
+	stroke-linejoin: round;
+}
+
+.wsergo-cls-radar__vertex {
+	stroke: #fff;
+	stroke-width: 1.5;
+	cursor: pointer;
+	transition: r 0.12s ease;
+}
+
+.wsergo-cls-radar__vertex:hover,
+.wsergo-cls-radar__vertex:focus {
+	r: 7;
+	outline: none;
+}
+
+.wsergo-cls-radar__axis-label {
+	font-size: 12px;
+	font-weight: 600;
+	fill: #334155;
+}
+
+.wsergo-cls-radar__axis-value {
+	font-size: 11px;
+	fill: #64748b;
+	font-variant-numeric: tabular-nums;
+}
+
+.wsergo-cls-radar__center {
+	fill: #64748b;
 }
 
 .wsergo-compare-tab-link__alt {

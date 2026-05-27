@@ -77,7 +77,7 @@ class WSErgo_Macro_Cluster_Optimizer {
 	 *
 	 * @param list<string> $features
 	 */
-	private static function score_feature_set_for_k( array $rows, array $features, int $k ): ?float {
+	private static function score_feature_set_for_k( array $rows, array $features, int $k, int $kmeans_restarts = 0 ): ?float {
 		$d = count( $features );
 		if ( $d < self::MIN_COMBO_FEATURES ) {
 			return null;
@@ -87,7 +87,10 @@ class WSErgo_Macro_Cluster_Optimizer {
 			return null;
 		}
 		$n = count( $X );
-		$labels = self::kmeans_best_labels( $X, $k, self::KMEANS_RESTARTS_PROBE, true, $d );
+		if ( $kmeans_restarts < 1 ) {
+			$kmeans_restarts = self::KMEANS_RESTARTS_PROBE;
+		}
+		$labels = self::kmeans_best_labels( $X, $k, $kmeans_restarts, true, $d );
 		if ( empty( $labels ) ) {
 			return null;
 		}
@@ -109,7 +112,7 @@ class WSErgo_Macro_Cluster_Optimizer {
 	 * @param list<string> $features
 	 * @param array{features:list<string>,k:int,quality:float}|null $best
 	 */
-	private static function try_combo_for_best( array $rows, array $features, ?array &$best, float &$best_q ): void {
+	private static function try_combo_for_best( array $rows, array $features, ?array &$best, float &$best_q, int $kmeans_restarts = 0 ): void {
 		if ( count( $features ) < self::MIN_FEATURES || ! self::features_are_uncorrelated( $rows, $features ) ) {
 			return;
 		}
@@ -121,7 +124,7 @@ class WSErgo_Macro_Cluster_Optimizer {
 		$n     = count( $X );
 		$k_max = self::max_k_allowed( $n, $d );
 		for ( $k = self::MIN_K_AUTOTUNE; $k <= $k_max; $k++ ) {
-			$q = self::score_feature_set_for_k( $rows, $features, $k );
+			$q = self::score_feature_set_for_k( $rows, $features, $k, $kmeans_restarts );
 			if ( null === $q || $q <= $best_q ) {
 				continue;
 			}
@@ -135,13 +138,15 @@ class WSErgo_Macro_Cluster_Optimizer {
 	}
 
 	/**
-	 * Случайный поиск валидной пары (features, k) под жёсткие ограничения.
+	 * Поиск валидной пары (features, k) под жёсткие ограничения.
 	 *
 	 * @param array<string, array<string, float>> $rows
 	 * @param array<string, array{cv:float,coverage:float,std:float,score:float}> $scored
+	 * @param bool $random_only true — только случайные комбинации (перезапуск после неудачи).
+	 * @param int  $attempt     номер попытки автоподбора (для разнообразия выборки).
 	 * @return array{features:list<string>,k:int,quality:float}|null
 	 */
-	private static function search_best_valid_solution_random( array $rows, array $scored ): ?array {
+	private static function search_best_valid_solution( array $rows, array $scored, bool $random_only, int $attempt ): ?array {
 		$start_ts = microtime( true );
 
 		uasort(
@@ -156,14 +161,30 @@ class WSErgo_Macro_Cluster_Optimizer {
 			return null;
 		}
 
+		$probe_restarts = self::KMEANS_RESTARTS_PROBE;
+		$random_tries   = self::TUNE_RANDOM_TRIES;
+		$time_budget    = self::TUNE_SEARCH_TIME_BUDGET_S;
+
+		if ( $random_only ) {
+			$probe_restarts = min( 12, self::KMEANS_RESTARTS_PROBE + 2 + min( 4, $attempt ) );
+			$random_tries   = min( 280, self::TUNE_RANDOM_TRIES + 35 * min( 5, max( 1, $attempt ) ) );
+			$time_budget    = min( 18.0, self::TUNE_SEARCH_TIME_BUDGET_S + 2.5 * min( 5, max( 1, $attempt ) ) );
+			if ( $attempt > 0 ) {
+				mt_srand( crc32( 'wsergo_tune_retry_' . $attempt . '|' . count( $rows ) . '|' . count( $pool ) ) );
+				shuffle( $pool );
+			}
+		}
+
 		$best   = null;
 		$best_q = -INF;
 
-		self::try_combo_for_best( $rows, self::select_features_for_separation( $rows, $scored ), $best, $best_q );
-		self::try_combo_for_best( $rows, self::select_uncorrelated_features( $rows, $scored ), $best, $best_q );
+		if ( ! $random_only ) {
+			self::try_combo_for_best( $rows, self::select_features_for_separation( $rows, $scored ), $best, $best_q, $probe_restarts );
+			self::try_combo_for_best( $rows, self::select_uncorrelated_features( $rows, $scored ), $best, $best_q, $probe_restarts );
+		}
 
-		for ( $t = 0; $t < self::TUNE_RANDOM_TRIES; $t++ ) {
-			if ( microtime( true ) - $start_ts > self::TUNE_SEARCH_TIME_BUDGET_S ) {
+		for ( $t = 0; $t < $random_tries; $t++ ) {
+			if ( microtime( true ) - $start_ts > $time_budget ) {
 				break;
 			}
 			$want = random_int( self::MIN_FEATURES, min( self::MAX_FEATURES, count( $pool ) ) );
@@ -171,7 +192,7 @@ class WSErgo_Macro_Cluster_Optimizer {
 			shuffle( $tmp );
 			$set = array_values( array_slice( $tmp, 0, $want ) );
 			sort( $set );
-			self::try_combo_for_best( $rows, $set, $best, $best_q );
+			self::try_combo_for_best( $rows, $set, $best, $best_q, $probe_restarts );
 		}
 
 		return $best;
@@ -296,7 +317,12 @@ class WSErgo_Macro_Cluster_Optimizer {
 		$report = self::build_feature_report( $scored, $selected );
 
 		$balance_note = '';
-		$labels       = self::kmeans_best_labels( $scaled, $k, self::KMEANS_RESTARTS_FINAL, false, count( $selected ) );
+		$labels       = self::best_cluster_labels( $scaled, $k );
+		if ( empty( $labels ) || ! self::is_partition_valid_for_labels( $labels, $k ) ) {
+			return array(
+				'ok' => false,
+			);
+		}
 		if ( ! empty( $labels ) ) {
 			$sil     = self::silhouette_avg( $scaled, $labels, $k );
 			$balance = self::cluster_balance_ratio( $labels, $k );
@@ -412,7 +438,9 @@ class WSErgo_Macro_Cluster_Optimizer {
 				);
 			}
 
-			$solution = self::search_best_valid_solution_random( $ctx['rows'], $ctx['scored'] );
+			// Первая попытка: быстрые эвристики + случайный перебор; далее — только случайный (без уведомления).
+			$random_only = ( $attempt > 0 );
+			$solution    = self::search_best_valid_solution( $ctx['rows'], $ctx['scored'], $random_only, $attempt );
 			if ( null === $solution ) {
 				continue;
 			}
@@ -420,9 +448,12 @@ class WSErgo_Macro_Cluster_Optimizer {
 			$job = array(
 				'best'         => $solution,
 				'partial_tune' => ! empty( $ctx['partial'] ),
-				'pool_note'    => '',
+				'pool_note'    => (string) ( $ctx['pool_note'] ?? '' ),
 			);
-			return self::finalize_tune_from_job( $job, $ctx['rows'], $ctx['scored'], $ctx );
+			$result = self::finalize_tune_from_job( $job, $ctx['rows'], $ctx['scored'], $ctx );
+			if ( ! empty( $result['ok'] ) ) {
+				return $result;
+			}
 		}
 
 		return array(

@@ -136,7 +136,7 @@ class WSErgo_Country_Renderer {
 		}
 
 		echo '<div id="' . esc_attr( $uid ) . '" data-wsergo-country-classification="1" data-cls-analysis-title="clsErgoTitle" data-cls-ladder-hint="ladderHintErgo">';
-		echo '<p class="wsp-muted">' . esc_html__( 'Шесть критериев F, Cm, H, A, S, Ct и сводный уровень — в перцентилях по всем странам с данными CSV. Ниже — балл этой страны на каждой шкале и текстовый вывод; сравнение с другими странами — на вкладке «Сравнение».', 'worldstat-ergonomics' ) . '</p>';
+		echo '<p class="wsp-muted">' . esc_html__( 'Шесть критериев F, Cm, H, A, S, Ct и сводный уровень — в перцентилях по всем странам с данными CSV. Ниже — радарная диаграмма профиля страны (0–100 по каждому критерию) и текстовый вывод; сравнение с другими странами — на вкладке «Сравнение».', 'worldstat-ergonomics' ) . '</p>';
 
 		echo '<p class="wsergo-country-classification-summary__tier">';
 		echo '<span class="wsergo-tier-badge wsergo-tier-badge--' . esc_attr( $slug ) . '">' . esc_html( (string) $tier['label'] ) . '</span>';
@@ -1276,7 +1276,7 @@ class WSErgo_Country_Renderer {
 					<?php
 					echo 'city' === $scope
 						? esc_html__( 'Расчёт по CSV с параметрами «Эргономичность города»', 'worldstat-ergonomics' )
-						: esc_html__( 'Расчёт по CSV платформы', 'worldstat-ergonomics' );
+						: esc_html__( 'Расчёт эргономичности по данным страны', 'worldstat-ergonomics' );
 					?>
 				</h3>
 				<?php if ( 'country' === $scope && ! empty( $analysis_url ) ) : ?>
