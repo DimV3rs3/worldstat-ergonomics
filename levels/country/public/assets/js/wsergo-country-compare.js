@@ -66,6 +66,26 @@
 		return out;
 	}
 
+	function pageIso2($root) {
+		var id = $root.attr('id');
+		if (id) {
+			var el = document.getElementById(id + '-json');
+			if (el && el.textContent) {
+				try {
+					var payload = JSON.parse(el.textContent);
+					if (payload && payload.highlight_iso2) {
+						return String(payload.highlight_iso2).toUpperCase();
+					}
+				} catch (e) { /* ignore */ }
+			}
+		}
+		var $pageRow = $root.find('.wsergo-country-compare-row.is-page-country').first();
+		if ($pageRow.length) {
+			return String($pageRow.attr('data-iso2') || '').toUpperCase();
+		}
+		return '';
+	}
+
 	var clsAnalysisTimer = null;
 
 	function updateSelectionStatus($root) {
@@ -342,10 +362,6 @@
 		}
 
 		renderViewToolbar($res, viewMode);
-		renderAnalysis($res, data.analysis || {}, 'wsergo-compare-analysis--trend');
-		// Ergonomics classification analysis is already shown above the regression block
-		// (under the country classification table) and auto-updates on selection change.
-		// Duplicating it here inside regression results is confusing.
 
 		var keys = [];
 		if (viewMode === 'separate') {
@@ -364,6 +380,7 @@
 		$res.data('chartKeys', keys);
 
 		renderCountryStats($res, data.countries || []);
+		renderAnalysis($res, data.analysis || {}, 'wsergo-compare-analysis--trend');
 	}
 
 	function runRegression($root) {
@@ -390,7 +407,8 @@
 				action: c.action || 'wsergo_country_compare_trends',
 				nonce: c.nonce,
 				metric_id: metricId,
-				iso2: iso2
+				iso2: iso2,
+				page_iso2: pageIso2($root)
 			}
 		}).done(function (res) {
 			if (res && res.success && res.data) {

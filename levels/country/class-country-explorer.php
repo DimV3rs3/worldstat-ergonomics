@@ -174,7 +174,7 @@ class WSErgo_Country_Explorer {
 		echo '</div></div>';
 
 		echo '<div class="wsp-country-analytics__results wsergo-country-compare-results" id="' . esc_attr( $uid ) . '-results" data-view-mode="combined">';
-		echo '<p class="wsp-muted wsergo-country-compare-results__placeholder">' . esc_html__( 'После «Построить график» появится сравнение трендов до 2050 г.', 'worldstat-ergonomics' ) . '</p>';
+		echo '<p class="wsp-muted wsergo-country-compare-results__placeholder">' . esc_html__( 'После «Построить график» — сравнение трендов до 2050 г. и аналитический вывод по графику (темпы, R², позиция страны страницы).', 'worldstat-ergonomics' ) . '</p>';
 		echo '</div></div>';
 
 		$json = wp_json_encode( $payload, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP );

@@ -53,7 +53,7 @@ class WSErgo_Country_Compare_Trends {
 	 * @param list<string> $iso2_list
 	 * @return array<string,mixed>
 	 */
-	public static function build_comparison( array $iso2_list, string $metric_id ): array {
+	public static function build_comparison( array $iso2_list, string $metric_id, string $page_iso2 = '' ): array {
 		$metric_id = sanitize_text_field( $metric_id );
 		if ( $metric_id === '' ) {
 			return array(
@@ -170,7 +170,8 @@ class WSErgo_Country_Compare_Trends {
 		$combined         = self::build_combined_chart( $ok_rows, $years, $metric_label );
 		$charts_separate  = self::build_separate_charts( $ok_rows, $metric_label );
 		$legend_items     = self::build_legend_items( $combined['datasets'] ?? array() );
-		$analysis         = self::build_analysis( $ok_rows, $metric_label );
+		$page_iso2        = strtoupper( sanitize_text_field( $page_iso2 ) );
+		$analysis         = self::build_analysis( $ok_rows, $metric_label, $page_iso2 );
 
 		$ergo_analysis = class_exists( 'WSErgo_Tier_Classifier' )
 			? WSErgo_Tier_Classifier::build_compare_classification_analysis( $iso2_list )
@@ -395,6 +396,90 @@ class WSErgo_Country_Compare_Trends {
 	}
 
 	/**
+	 * @param list<float> $values
+	 */
+	private static function median_float( array $values ): ?float {
+		$values = array_values(
+			array_filter(
+				$values,
+				static function ( $v ) {
+					return is_finite( (float) $v );
+				}
+			)
+		);
+		$n = count( $values );
+		if ( $n < 1 ) {
+			return null;
+		}
+		sort( $values, SORT_NUMERIC );
+		$mid = (int) floor( $n / 2 );
+		if ( $n % 2 === 1 ) {
+			return (float) $values[ $mid ];
+		}
+		return ( (float) $values[ $mid - 1 ] + (float) $values[ $mid ] ) / 2.0;
+	}
+
+	private static function r2_quality_phrase( float $r2 ): string {
+		if ( $r2 >= 0.85 ) {
+			return __( 'тренд на графике почти повторяет фактические точки', 'worldstat-ergonomics' );
+		}
+		if ( $r2 >= 0.55 ) {
+			return __( 'линейный тренд умеренно описывает историю', 'worldstat-ergonomics' );
+		}
+		if ( $r2 >= 0.25 ) {
+			return __( 'существенная часть динамики не укладывается в прямую', 'worldstat-ergonomics' );
+		}
+		return __( 'пунктирный тренд слабо связан с фактом — ориентир с осторожностью', 'worldstat-ergonomics' );
+	}
+
+	/**
+	 * @param list<array<string,mixed>> $rows
+	 * @return array<string,mixed>|null
+	 */
+	private static function find_analysis_row_by_iso2( array $rows, string $iso2 ): ?array {
+		$iso2 = strtoupper( sanitize_text_field( $iso2 ) );
+		if ( strlen( $iso2 ) !== 2 ) {
+			return null;
+		}
+		foreach ( $rows as $row ) {
+			if ( strtoupper( (string) ( $row['iso2'] ?? '' ) ) === $iso2 ) {
+				return $row;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * @param list<array<string,mixed>> $rows
+	 * @return array{rank:int,total:int}|null
+	 */
+	private static function rank_row_by_field( array $rows, string $iso2, string $field, bool $desc = true ): ?array {
+		$iso2 = strtoupper( sanitize_text_field( $iso2 ) );
+		if ( strlen( $iso2 ) !== 2 ) {
+			return null;
+		}
+		$sorted = $rows;
+		usort(
+			$sorted,
+			static function ( $a, $b ) use ( $field, $desc ) {
+				$va = isset( $a[ $field ] ) && is_numeric( $a[ $field ] ) ? (float) $a[ $field ] : ( $desc ? -INF : INF );
+				$vb = isset( $b[ $field ] ) && is_numeric( $b[ $field ] ) ? (float) $b[ $field ] : ( $desc ? -INF : INF );
+				return $desc ? ( $vb <=> $va ) : ( $va <=> $vb );
+			}
+		);
+		$total = count( $sorted );
+		foreach ( $sorted as $i => $row ) {
+			if ( strtoupper( (string) ( $row['iso2'] ?? '' ) ) === $iso2 ) {
+				return array(
+					'rank'  => $i + 1,
+					'total' => $total,
+				);
+			}
+		}
+		return null;
+	}
+
+	/**
 	 * @param array{series:array<int,float>} $metric
 	 * @param array<string,mixed>            $regression
 	 */
@@ -424,8 +509,10 @@ class WSErgo_Country_Compare_Trends {
 		return round( ( ( (float) $st - $base_val ) / abs( $base_val ) ) * 100.0, 1 );
 	}
 
-	private static function build_analysis( array $ok_rows, string $metric_label ): array {
-		$rows = array();
+	private static function build_analysis( array $ok_rows, string $metric_label, string $page_iso2 = '' ): array {
+		$forecast_end = 2050;
+		$rows         = array();
+
 		foreach ( $ok_rows as $cr ) {
 			$st = $cr['regression']['stats'] ?? array();
 			if ( ! is_array( $st ) || ! isset( $st['forecast']['value'] ) ) {
@@ -445,8 +532,12 @@ class WSErgo_Country_Compare_Trends {
 			}
 			$base_year = 0;
 			$base_val  = 0.0;
+			$year_min  = 0;
+			$year_max  = 0;
 			if ( ! empty( $series ) ) {
 				ksort( $series, SORT_NUMERIC );
+				$year_min = (int) array_key_first( $series );
+				$year_max = (int) array_key_last( $series );
 				foreach ( $series as $y => $v ) {
 					if ( $y <= (int) gmdate( 'Y' ) + 1 ) {
 						$base_year = (int) $y;
@@ -454,7 +545,7 @@ class WSErgo_Country_Compare_Trends {
 					}
 				}
 				if ( $base_year < 1 ) {
-					$base_year = (int) array_key_first( $series );
+					$base_year = $year_min;
 					$base_val  = (float) reset( $series );
 				}
 			}
@@ -463,17 +554,23 @@ class WSErgo_Country_Compare_Trends {
 			if ( abs( $base_val ) > 1e-9 ) {
 				$pct = ( ( $forecast - $base_val ) / abs( $base_val ) ) * 100.0;
 			}
-			$rows[] = array(
-				'name'      => (string) ( $cr['name'] ?? $cr['iso2'] ),
-				'iso2'      => (string) ( $cr['iso2'] ?? '' ),
-				'r2'        => isset( $st['r2'] ) ? (float) $st['r2'] : 0.0,
-				'slope'     => isset( $st['slope'] ) ? (float) $st['slope'] : 0.0,
-				'direction' => (string) ( $st['direction'] ?? '' ),
-				'forecast'  => $forecast,
-				'year'      => (int) ( $st['forecast']['year'] ?? 2050 ),
-				'base_year' => $base_year,
-				'base_val'  => $base_val,
-				'pct'       => $pct,
+			$slope      = isset( $st['slope'] ) ? (float) $st['slope'] : 0.0;
+			$annual_pct = ( abs( $base_val ) > 1e-9 ) ? ( $slope / abs( $base_val ) ) * 100.0 : null;
+			$rows[]     = array(
+				'name'       => (string) ( $cr['name'] ?? $cr['iso2'] ),
+				'iso2'       => (string) ( $cr['iso2'] ?? '' ),
+				'r2'         => isset( $st['r2'] ) ? (float) $st['r2'] : 0.0,
+				'slope'      => $slope,
+				'direction'  => (string) ( $st['direction'] ?? '' ),
+				'forecast'   => $forecast,
+				'year'       => (int) ( $st['forecast']['year'] ?? $forecast_end ),
+				'base_year'  => $base_year,
+				'base_val'   => $base_val,
+				'pct'        => $pct,
+				'annual_pct' => $annual_pct,
+				'n_years'    => count( $series ),
+				'year_min'   => $year_min,
+				'year_max'   => $year_max,
 			);
 		}
 
@@ -484,6 +581,9 @@ class WSErgo_Country_Compare_Trends {
 				'insights'   => array(),
 			);
 		}
+
+		$page_iso2 = strtoupper( sanitize_text_field( $page_iso2 ) );
+		$page_row  = self::find_analysis_row_by_iso2( $rows, $page_iso2 );
 
 		$with_pct = array_values(
 			array_filter(
@@ -500,98 +600,15 @@ class WSErgo_Country_Compare_Trends {
 			}
 		);
 
-		$forecast_sorted = $rows;
-		usort(
-			$forecast_sorted,
-			static function ( $a, $b ) {
-				return ( $b['forecast'] ?? 0 ) <=> ( $a['forecast'] ?? 0 );
-			}
+		$pct_leader  = ! empty( $with_pct ) ? $with_pct[0] : null;
+		$pct_laggard = ! empty( $with_pct ) ? $with_pct[ count( $with_pct ) - 1 ] : null;
+		$pct_values  = array_map(
+			static function ( $r ) {
+				return (float) $r['pct'];
+			},
+			$with_pct
 		);
-		$abs_leader = $forecast_sorted[0];
-
-		if ( ! empty( $with_pct ) ) {
-			$pct_leader = $with_pct[0];
-			$pct_laggard = $with_pct[ count( $with_pct ) - 1 ];
-			$summary     = sprintf(
-				/* translators: 1: metric, 2: count, 3: country, 4: pct, 5: year */
-				__(
-					'По показателю «%1$s» сравнены %2$d стран. Наибольший относительный рост к %5$d г. у %3$s (%4$s%% к базе %6$d г.).',
-					'worldstat-ergonomics'
-				),
-				$metric_label,
-				count( $rows ),
-				$pct_leader['name'],
-				self::format_plain_number( (float) $pct_leader['pct'], 1 ),
-				(int) $pct_leader['year'],
-				(int) $pct_leader['base_year']
-			);
-		} else {
-			$summary = sprintf(
-				/* translators: 1: metric, 2: count */
-				__( 'По показателю «%1$s» сравнены %2$d стран. Недостаточно данных для расчёта относительного изменения.', 'worldstat-ergonomics' ),
-				$metric_label,
-				count( $rows )
-			);
-			$pct_leader  = null;
-			$pct_laggard = null;
-		}
-
-		$insights = array();
-		if ( ! empty( $with_pct ) && count( $with_pct ) > 1 ) {
-			$insights[] = sprintf(
-				/* translators: 1: country, 2: pct, 3: country, 4: pct */
-				__(
-					'Разброс темпа изменения: от %1$s (%2$s%%) до %3$s (%4$s%%).',
-					'worldstat-ergonomics'
-				),
-				$pct_laggard['name'],
-				self::format_plain_number( (float) $pct_laggard['pct'], 1 ),
-				$pct_leader['name'],
-				self::format_plain_number( (float) $pct_leader['pct'], 1 )
-			);
-		}
-
-		$insights[] = sprintf(
-			/* translators: 1: country, 2: value, 3: year */
-			__(
-				'Абсолютный максимум прогноза (не сравнивать страны разного масштаба): %1$s — %2$s к %3$d г.',
-				'worldstat-ergonomics'
-			),
-			$abs_leader['name'],
-			self::format_plain_number( (float) $abs_leader['forecast'], 2 ),
-			(int) $abs_leader['year']
-		);
-
-		$growth  = array_values(
-			array_filter(
-				$rows,
-				static function ( $r ) {
-					return ( $r['slope'] ?? 0 ) > 0;
-				}
-			)
-		);
-		$decline = array_values(
-			array_filter(
-				$rows,
-				static function ( $r ) {
-					return ( $r['slope'] ?? 0 ) < 0;
-				}
-			)
-		);
-		if ( count( $growth ) > 0 ) {
-			$names = array_slice( array_column( $growth, 'name' ), 0, 4 );
-			$insights[] = sprintf(
-				__( 'Линейный рост тренда: %s.', 'worldstat-ergonomics' ),
-				implode( ', ', $names ) . ( count( $growth ) > 4 ? '…' : '' )
-			);
-		}
-		if ( count( $decline ) > 0 ) {
-			$names = array_slice( array_column( $decline, 'name' ), 0, 4 );
-			$insights[] = sprintf(
-				__( 'Снижение по тренду: %s.', 'worldstat-ergonomics' ),
-				implode( ', ', $names ) . ( count( $decline ) > 4 ? '…' : '' )
-			);
-		}
+		$median_pct  = self::median_float( $pct_values );
 
 		$best_r2 = $rows[0];
 		foreach ( $rows as $r ) {
@@ -599,24 +616,205 @@ class WSErgo_Country_Compare_Trends {
 				$best_r2 = $r;
 			}
 		}
-		if ( ( $best_r2['r2'] ?? 0 ) >= 0.5 ) {
+
+		$summary = sprintf(
+			/* translators: 1: metric label, 2: country count, 3: forecast end year */
+			__(
+				'Показатель «%1$s»: на графике %2$d стран — сплошная линия факта по годам CSV, пунктир — линейная регрессия OLS до %3$d г. Сравнение темпов — по столбцу «Δ к базе, %%», а не по высоте линий (масштабы показателя у стран различаются).',
+				'worldstat-ergonomics'
+			),
+			$metric_label,
+			count( $rows ),
+			(int) ( $rows[0]['year'] ?? $forecast_end )
+		);
+
+		if ( null !== $page_row && $page_row['pct'] !== null ) {
+			$summary .= ' ' . sprintf(
+				/* translators: 1: country, 2: direction, 3: pct, 4: base year, 5: forecast year, 6: r2 */
+				__(
+					'Страна страницы (%1$s): тренд — %2$s; к %5$d г. по линии тренда Δ ≈ %3$s%% от уровня %4$d г. (R² = %6$s).',
+					'worldstat-ergonomics'
+				),
+				$page_row['name'],
+				$page_row['direction'] !== '' ? $page_row['direction'] : '—',
+				self::format_plain_number( (float) $page_row['pct'], 1 ),
+				(int) $page_row['base_year'],
+				(int) $page_row['year'],
+				self::format_plain_number( (float) $page_row['r2'], 3 )
+			);
+		}
+
+		$insights   = array();
+		$insights[] = __(
+			'Как читать график: до последнего года с данными — только наблюдения; далее пунктир продолжает наклон OLS (это не сценарный прогноз ВБ, а экстраполяция прямой).',
+			'worldstat-ergonomics'
+		);
+
+		if ( ! empty( $with_pct ) && count( $with_pct ) > 1 && null !== $pct_leader && null !== $pct_laggard ) {
+			$spread = (float) $pct_leader['pct'] - (float) $pct_laggard['pct'];
 			$insights[] = sprintf(
-				__( 'Наиболее устойчивый линейный тренд (R² = %2$s) — у %1$s.', 'worldstat-ergonomics' ),
+				/* translators: 1: min country, 2: min pct, 3: max country, 4: max pct, 5: spread */
+				__(
+					'Разброс относительного изменения к %6$d г. в выборке: от %1$s (%2$s%%) до %3$s (%4$s%%) — разница %5$s п.п.; страны расходятся по темпу, а не только по уровню.',
+					'worldstat-ergonomics'
+				),
+				$pct_laggard['name'],
+				self::format_plain_number( (float) $pct_laggard['pct'], 1 ),
+				$pct_leader['name'],
+				self::format_plain_number( (float) $pct_leader['pct'], 1 ),
+				self::format_plain_number( $spread, 1 ),
+				(int) $pct_leader['year']
+			);
+		}
+
+		if ( null !== $median_pct && count( $with_pct ) >= 2 ) {
+			$insights[] = sprintf(
+				/* translators: 1: median pct, 2: forecast year */
+				__(
+					'Медиана Δ к базе по выбранным странам — %1$s%% (ориентир «типичного» темпа на графике к %2$d г.).',
+					'worldstat-ergonomics'
+				),
+				self::format_plain_number( $median_pct, 1 ),
+				(int) ( $rows[0]['year'] ?? $forecast_end )
+			);
+		}
+
+		if ( null !== $page_row && null !== $page_row['pct'] && null !== $median_pct && count( $with_pct ) >= 2 ) {
+			$delta_pp = (float) $page_row['pct'] - $median_pct;
+			if ( abs( $delta_pp ) < 0.5 ) {
+				$insights[] = sprintf(
+					/* translators: %s: country name */
+					__( '%s: темп почти совпадает с медианой выборки — на совмещённом графике наклон пунктира близок к «середине» группы.', 'worldstat-ergonomics' ),
+					$page_row['name']
+				);
+			} elseif ( $delta_pp > 0 ) {
+				$insights[] = sprintf(
+					/* translators: 1: country, 2: pp above median */
+					__( '%1$s опережает медиану выборки на %2$s п.п. по Δ — пунктир на графике к 2050 г. круче, чем у большинства отмеченных стран.', 'worldstat-ergonomics' ),
+					$page_row['name'],
+					self::format_plain_number( $delta_pp, 1 )
+				);
+			} else {
+				$insights[] = sprintf(
+					/* translators: 1: country, 2: pp below median */
+					__( '%1$s отстаёт от медианы выборки на %2$s п.п. по Δ — на графике тренд мягче, чем у большинства.', 'worldstat-ergonomics' ),
+					$page_row['name'],
+					self::format_plain_number( abs( $delta_pp ), 1 )
+				);
+			}
+			$rank = self::rank_row_by_field( $with_pct, $page_iso2, 'pct', true );
+			if ( null !== $rank && $rank['total'] > 1 ) {
+				$insights[] = sprintf(
+					/* translators: 1: country, 2: rank, 3: total */
+					__( 'По темпу изменения %1$s — %2$d-е из %3$d в отмеченной группе (сортировка по Δ к базе).', 'worldstat-ergonomics' ),
+					$page_row['name'],
+					(int) $rank['rank'],
+					(int) $rank['total']
+				);
+			}
+		}
+
+		if ( null !== $page_row ) {
+			$insights[] = sprintf(
+				/* translators: 1: country, 2: r2, 3: quality phrase, 4: year count */
+				__(
+					'Качество линии для %1$s: R² = %2$s — %3$s (%4$d лет факта в ряду).',
+					'worldstat-ergonomics'
+				),
+				$page_row['name'],
+				self::format_plain_number( (float) $page_row['r2'], 3 ),
+				self::r2_quality_phrase( (float) $page_row['r2'] ),
+				(int) $page_row['n_years']
+			);
+		}
+
+		$weak_r2 = array_values(
+			array_filter(
+				$rows,
+				static function ( $r ) {
+					return ( $r['r2'] ?? 0 ) < 0.35;
+				}
+			)
+		);
+		if ( ! empty( $weak_r2 ) ) {
+			$names = array_slice( array_column( $weak_r2, 'name' ), 0, 3 );
+			$insights[] = sprintf(
+				/* translators: %s: country list */
+				__(
+					'Слабая линейная аппроксимация (R² меньше 0,35) — пунктир на графике условен: %s.',
+					'worldstat-ergonomics'
+				),
+				implode( ', ', $names ) . ( count( $weak_r2 ) > 3 ? '…' : '' )
+			);
+		}
+
+		if ( ( $best_r2['r2'] ?? 0 ) >= 0.55 ) {
+			$insights[] = sprintf(
+				/* translators: 1: country, 2: r2 */
+				__(
+					'На графике наиболее «ровный» тренд (макс. R² = %2$s) — у %1$s: пунктир почти повторяет изломы фактической кривой.',
+					'worldstat-ergonomics'
+				),
 				$best_r2['name'],
 				self::format_plain_number( (float) $best_r2['r2'], 3 )
 			);
 		}
 
-		$highlights = array();
-		if ( ! empty( $with_pct ) ) {
+		$growth  = 0;
+		$decline = 0;
+		$stable  = 0;
+		foreach ( $rows as $r ) {
+			$slope = (float) ( $r['slope'] ?? 0 );
+			if ( $slope > 1e-9 ) {
+				++$growth;
+			} elseif ( $slope < -1e-9 ) {
+				++$decline;
+			} else {
+				++$stable;
+			}
+		}
+		$n = count( $rows );
+		if ( $n > 1 ) {
+			$insights[] = sprintf(
+				/* translators: 1: growth count, 2: decline count, 3: stable count, 4: total */
+				__(
+					'Направление наклона OLS в выборке: рост — %1$d, снижение — %2$d, около нуля — %3$d из %4$d (смотрите наклон пунктира, не абсолютный уровень).',
+					'worldstat-ergonomics'
+				),
+				$growth,
+				$decline,
+				$stable,
+				$n
+			);
+		}
+
+		$highlights = array(
+			array(
+				'label' => __( 'Стран на графике', 'worldstat-ergonomics' ),
+				'value' => (string) count( $rows ),
+			),
+		);
+		if ( null !== $page_row && $page_row['pct'] !== null ) {
 			$highlights[] = array(
-				'label' => __( 'Макс. рост, %', 'worldstat-ergonomics' ),
+				'label' => __( 'Страна страницы, Δ', 'worldstat-ergonomics' ),
+				'value' => self::format_plain_number( (float) $page_row['pct'], 1 ) . '%',
+			);
+		}
+		if ( null !== $median_pct ) {
+			$highlights[] = array(
+				'label' => __( 'Медиана Δ, %', 'worldstat-ergonomics' ),
+				'value' => self::format_plain_number( $median_pct, 1 ) . '%',
+			);
+		}
+		if ( null !== $pct_leader ) {
+			$highlights[] = array(
+				'label' => __( 'Макс. темп, Δ', 'worldstat-ergonomics' ),
 				'value' => $pct_leader['name'] . ' — ' . self::format_plain_number( (float) $pct_leader['pct'], 1 ) . '%',
 			);
 		}
 		$highlights[] = array(
-			'label' => __( 'Стран в сравнении', 'worldstat-ergonomics' ),
-			'value' => (string) count( $rows ),
+			'label' => __( 'Лучший R² тренда', 'worldstat-ergonomics' ),
+			'value' => $best_r2['name'] . ' — ' . self::format_plain_number( (float) $best_r2['r2'], 3 ),
 		);
 
 		return array(
@@ -707,7 +905,8 @@ class WSErgo_Country_Compare_Trends {
 			$iso2_raw = array( $iso2_raw );
 		}
 
-		$result = self::build_comparison( $iso2_raw, $metric_id );
+		$page_iso2 = isset( $_POST['page_iso2'] ) ? sanitize_text_field( (string) wp_unslash( $_POST['page_iso2'] ) ) : '';
+		$result    = self::build_comparison( $iso2_raw, $metric_id, $page_iso2 );
 		if ( ! empty( $result['ok'] ) ) {
 			self::json_success( $result );
 		}
