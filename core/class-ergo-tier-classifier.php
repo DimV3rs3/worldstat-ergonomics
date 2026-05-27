@@ -716,7 +716,7 @@ class WSErgo_Tier_Classifier {
 
 		$axis_labels = self::axis_labels_ru();
 		$summary     = sprintf(
-			__( 'Сравнение %1$d стран: по каждой оси — динамическая шкала выборки; итог согласован с уровнями шести критериев (веса E) и взвешенным баллом.', 'worldstat-ergonomics' ),
+			__( 'Сравнение %1$d стран: на шкалах ниже — положение по шести критериям (F, Cm, H, A, S, Ct) на растянутой шкале выборки; цвет зоны — уровень, точка — страна (наведите для балла). Итог согласован с весами E.', 'worldstat-ergonomics' ),
 			count( $selected )
 		);
 
@@ -728,6 +728,30 @@ class WSErgo_Tier_Classifier {
 		);
 
 		$insights    = array();
+		$page_iso    = '';
+		foreach ( $iso2_list as $one ) {
+			if ( isset( $rows_by_iso[ $one ] ) ) {
+				$page_iso = $one;
+				break;
+			}
+		}
+		if ( $page_iso !== '' && count( $selected ) >= 1 ) {
+			$page_row = $rows_by_iso[ $page_iso ];
+			$weak_lbl = array();
+			foreach ( (array) ( $page_row['limiting_labels'] ?? array() ) as $lb ) {
+				if ( is_string( $lb ) && $lb !== '' ) {
+					$weak_lbl[] = $lb;
+				}
+			}
+			if ( ! empty( $weak_lbl ) ) {
+				$insights[] = sprintf(
+					/* translators: 1: country, 2: axes list */
+					__( '%1$s: слабее итогового уровня по осям — %2$s (см. точки левее на соответствующих шкалах).', 'worldstat-ergonomics' ),
+					(string) ( $page_row['name'] ?? $page_iso ),
+					implode( ', ', $weak_lbl )
+				);
+			}
+		}
 		$tier_counts = array();
 		$weak_axis   = array();
 		foreach ( $selected as $row ) {
@@ -833,6 +857,600 @@ class WSErgo_Tier_Classifier {
 			'excellent' => 4,
 		);
 		return $map[ $slug ] ?? 2;
+	}
+
+	/**
+	 * @param list<float> $values
+	 */
+	private static function median_float( array $values ): ?float {
+		$values = array_values(
+			array_filter(
+				$values,
+				static function ( $v ) {
+					return is_finite( (float) $v );
+				}
+			)
+		);
+		$n = count( $values );
+		if ( $n < 1 ) {
+			return null;
+		}
+		sort( $values, SORT_NUMERIC );
+		$mid = (int) floor( $n / 2 );
+		if ( $n % 2 === 1 ) {
+			return (float) $values[ $mid ];
+		}
+		return ( (float) $values[ $mid - 1 ] + (float) $values[ $mid ] ) / 2.0;
+	}
+
+	/**
+	 * Пять цветовых зон шкалы (0–100% относительной позиции).
+	 *
+	 * @return list<array{slug:string,label:string,color:string,from_pct:float,to_pct:float}>
+	 */
+	public static function tier_bands_for_chart(): array {
+		$defs = array(
+			array( 'critical', 0.0, self::REL_POOR ),
+			array( 'poor', self::REL_POOR, self::REL_AVERAGE ),
+			array( 'average', self::REL_AVERAGE, self::REL_GOOD ),
+			array( 'good', self::REL_GOOD, self::REL_EXCELLENT ),
+			array( 'excellent', self::REL_EXCELLENT, 1.0 ),
+		);
+		$out = array();
+		foreach ( $defs as $d ) {
+			$m     = self::tier_meta( $d[0] );
+			$out[] = array(
+				'slug'     => (string) $m['slug'],
+				'label'    => (string) $m['label'],
+				'color'    => (string) $m['color'],
+				'from_pct' => round( $d[1] * 100.0, 1 ),
+				'to_pct'   => round( $d[2] * 100.0, 1 ),
+			);
+		}
+		return $out;
+	}
+
+	/**
+	 * Данные для горизонтальных шкал классификации (6 критериев F…Ct).
+	 *
+	 * @param string $highlight_iso2 ISO2 страны страницы (выделение на шкале).
+	 * @param bool   $only_highlight Только точки этой страны (вкладка «Эргономичность»).
+	 * @return array<string, mixed>
+	 */
+	public static function build_axis_ladder_chart_payload( string $highlight_iso2 = '', bool $only_highlight = false ): array {
+		$highlight_iso2 = strtoupper( sanitize_text_field( $highlight_iso2 ) );
+		$only_highlight = $only_highlight && $highlight_iso2 !== '';
+		$ctx            = self::get_global_context();
+		$rows           = self::get_global_classification_rows();
+		$labels         = self::axis_labels_ru();
+		$axes_out       = array();
+
+		foreach ( self::CRITERIA_KEYS as $k ) {
+			$scale = isset( $ctx['axis_scales'][ $k ] ) && is_array( $ctx['axis_scales'][ $k ] )
+				? $ctx['axis_scales'][ $k ]
+				: null;
+			if ( null === $scale ) {
+				continue;
+			}
+			$countries = array();
+			foreach ( $rows as $row ) {
+				if ( ! is_array( $row ) ) {
+					continue;
+				}
+				$score = isset( $row['axes'][ $k ] ) ? (float) $row['axes'][ $k ] : 0.0;
+				if ( $score <= 0 || ! is_finite( $score ) ) {
+					continue;
+				}
+				$rel   = self::relative_position( $score, $scale );
+				$at    = isset( $row['axis_tiers'][ $k ] ) && is_array( $row['axis_tiers'][ $k ] )
+					? $row['axis_tiers'][ $k ]
+					: self::tier_from_relative( $rel );
+				$iso = strtoupper( (string) ( $row['iso2'] ?? '' ) );
+				if ( $only_highlight && $iso !== $highlight_iso2 ) {
+					continue;
+				}
+				$pos = max( 0.0, min( 100.0, $score ) );
+				$countries[] = array(
+					'iso2'       => $iso,
+					'name'       => (string) ( $row['name'] ?? $iso ),
+					'score'      => round( $score, 1 ),
+					'pct'        => round( $pos, 2 ),
+					'tier_slug'  => (string) ( $at['slug'] ?? '' ),
+					'tier_label' => (string) ( $at['label'] ?? '' ),
+					'tier_color' => (string) ( $at['color'] ?? '#6b7280' ),
+					'highlight'  => ( $highlight_iso2 !== '' && $iso === $highlight_iso2 ),
+				);
+			}
+			$axes_out[] = array(
+				'key'       => $k,
+				'label'     => (string) ( $labels[ $k ] ?? $k ),
+				'scale'     => array(
+					'min'  => 0,
+					'max'  => 100,
+					'low'  => 0,
+					'high' => 100,
+				),
+				'countries' => $countries,
+			);
+		}
+
+		return array(
+			'bands'          => self::tier_bands_for_chart(),
+			'axes'           => $axes_out,
+			'highlight_iso2' => $highlight_iso2,
+			'n_countries'    => (int) ( $ctx['n_countries'] ?? count( $rows ) ),
+		);
+	}
+
+	/**
+	 * Точки для 2D-графика классификации (оси F…Ct, балл 0–100).
+	 *
+	 * @return array<string, mixed>
+	 */
+	public static function build_scatter_chart_payload( string $highlight_iso2 = '' ): array {
+		$highlight_iso2 = strtoupper( sanitize_text_field( $highlight_iso2 ) );
+		$labels         = self::axis_labels_ru();
+		$axis_options   = array();
+		foreach ( self::CRITERIA_KEYS as $k ) {
+			$axis_options[] = array(
+				'key'   => $k,
+				'label' => (string) ( $labels[ $k ] ?? $k ),
+			);
+		}
+
+		$countries = array();
+		foreach ( self::get_global_classification_rows() as $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$axes_scores = array();
+			foreach ( self::CRITERIA_KEYS as $k ) {
+				if ( isset( $row['axes'][ $k ] ) && is_numeric( $row['axes'][ $k ] ) ) {
+					$v = (float) $row['axes'][ $k ];
+					if ( $v > 0 && is_finite( $v ) ) {
+						$axes_scores[ $k ] = round( max( 0.0, min( 100.0, $v ) ), 2 );
+					}
+				}
+			}
+			if ( empty( $axes_scores ) ) {
+				continue;
+			}
+			$iso  = strtoupper( (string) ( $row['iso2'] ?? '' ) );
+			$tier = isset( $row['tier'] ) && is_array( $row['tier'] ) ? $row['tier'] : array();
+			$countries[] = array(
+				'iso2'       => $iso,
+				'name'       => (string) ( $row['name'] ?? $iso ),
+				'composite'  => round( (float) ( $row['composite'] ?? 0 ), 1 ),
+				'axes'       => $axes_scores,
+				'tier_slug'  => (string) ( $tier['slug'] ?? '' ),
+				'tier_label' => (string) ( $tier['label'] ?? '' ),
+				'tier_color' => (string) ( $tier['color'] ?? '#6b7280' ),
+				'highlight'  => ( $highlight_iso2 !== '' && $iso === $highlight_iso2 ),
+			);
+		}
+
+		return array(
+			'axis_options'   => $axis_options,
+			'default_x'      => 'F',
+			'default_y'      => 'S',
+			'countries'      => $countries,
+			'highlight_iso2' => $highlight_iso2,
+		);
+	}
+
+	/**
+	 * Аналитика классификации: положение страны страницы относительно отмеченных или глобальной выборки.
+	 *
+	 * @param list<string> $iso2_list   Отмеченные в таблице ISO2.
+	 * @param string       $focus_iso2  Страна страницы (фокус сравнения).
+	 * @return array{summary:string,highlights:list<array{label:string,value:string}>,insights:list<string>}
+	 */
+	public static function build_classification_visual_analysis( array $iso2_list, string $focus_iso2 = '' ): array {
+		$iso2_list = array_values(
+			array_unique(
+				array_filter(
+					array_map(
+						static function ( $c ) {
+							$c = strtoupper( sanitize_text_field( (string) $c ) );
+							return strlen( $c ) === 2 ? $c : '';
+						},
+						$iso2_list
+					)
+				)
+			)
+		);
+		$focus_iso2 = strtoupper( sanitize_text_field( $focus_iso2 ) );
+		if ( $focus_iso2 === '' && ! empty( $iso2_list ) ) {
+			$focus_iso2 = $iso2_list[0];
+		}
+
+		$rows_by_iso = array();
+		foreach ( self::get_global_classification_rows() as $row ) {
+			$iso = strtoupper( (string) ( $row['iso2'] ?? '' ) );
+			if ( $iso !== '' ) {
+				$rows_by_iso[ $iso ] = $row;
+			}
+		}
+
+		if ( $focus_iso2 === '' || ! isset( $rows_by_iso[ $focus_iso2 ] ) ) {
+			return array(
+				'summary'    => __( 'Отметьте страны в таблице или откройте страницу с данными эргономичности — появится сравнительный вывод.', 'worldstat-ergonomics' ),
+				'insights'   => array(),
+				'highlights' => array(),
+			);
+		}
+
+		$focus = $rows_by_iso[ $focus_iso2 ];
+		$name  = (string) ( $focus['name'] ?? $focus_iso2 );
+
+		$peer_rows = array();
+		foreach ( $iso2_list as $iso ) {
+			if ( isset( $rows_by_iso[ $iso ] ) ) {
+				$peer_rows[] = $rows_by_iso[ $iso ];
+			}
+		}
+		$use_global_peers = count( $peer_rows ) < 2;
+		if ( $use_global_peers ) {
+			$peer_rows = array_values( $rows_by_iso );
+			$peer_scope = sprintf(
+				/* translators: %d: country count */
+				__( 'глобальной выборке (%d стран)', 'worldstat-ergonomics' ),
+				count( $peer_rows )
+			);
+		} else {
+			$peer_scope = sprintf(
+				/* translators: %d: selected count */
+				__( '%d отмеченных странах', 'worldstat-ergonomics' ),
+				count( $peer_rows )
+			);
+			$focus_in_peers = false;
+			foreach ( $peer_rows as $pr ) {
+				if ( strtoupper( (string) ( $pr['iso2'] ?? '' ) ) === $focus_iso2 ) {
+					$focus_in_peers = true;
+					break;
+				}
+			}
+			if ( ! $focus_in_peers ) {
+				$peer_rows[] = $focus;
+				$peer_scope = sprintf(
+					/* translators: %d: selected count */
+					__( 'отмеченных странах (страна страницы добавлена для сравнения)', 'worldstat-ergonomics' ),
+					count( $iso2_list )
+				);
+			}
+		}
+
+		$composite_focus = (float) ( $focus['composite'] ?? 0 );
+		$tier_focus      = isset( $focus['tier'] ) && is_array( $focus['tier'] ) ? $focus['tier'] : array();
+		$tier_label      = (string) ( $tier_focus['label'] ?? '—' );
+
+		$sorted_peers = $peer_rows;
+		usort(
+			$sorted_peers,
+			static function ( $a, $b ) {
+				return ( (float) ( $b['composite'] ?? 0 ) ) <=> ( (float) ( $a['composite'] ?? 0 ) );
+			}
+		);
+		$rank  = 1;
+		$total = count( $sorted_peers );
+		foreach ( $sorted_peers as $i => $row ) {
+			if ( strtoupper( (string) ( $row['iso2'] ?? '' ) ) === $focus_iso2 ) {
+				$rank = $i + 1;
+				break;
+			}
+		}
+
+		$composites = array();
+		foreach ( $peer_rows as $row ) {
+			$composites[] = (float) ( $row['composite'] ?? 0 );
+		}
+		$median_composite = self::median_float( $composites );
+		$delta_composite  = null !== $median_composite ? $composite_focus - $median_composite : null;
+
+		$axis_labels = self::axis_labels_ru();
+		$stronger    = array();
+		$weaker      = array();
+		$axis_ranks  = array();
+
+		foreach ( self::CRITERIA_KEYS as $k ) {
+			$fv = isset( $focus['axes'][ $k ] ) ? (float) $focus['axes'][ $k ] : 0.0;
+			if ( $fv <= 0 ) {
+				continue;
+			}
+			$vals = array();
+			foreach ( $peer_rows as $row ) {
+				if ( isset( $row['axes'][ $k ] ) && is_numeric( $row['axes'][ $k ] ) ) {
+					$vals[] = (float) $row['axes'][ $k ];
+				}
+			}
+			if ( empty( $vals ) ) {
+				continue;
+			}
+			$med = self::median_float( $vals );
+			if ( null === $med ) {
+				continue;
+			}
+			$diff = $fv - $med;
+			$lab  = (string) ( $axis_labels[ $k ] ?? $k );
+			if ( $diff >= 3.0 ) {
+				$stronger[] = array(
+					'key'   => $k,
+					'label' => $lab,
+					'diff'  => $diff,
+					'score' => $fv,
+				);
+			} elseif ( $diff <= -3.0 ) {
+				$weaker[] = array(
+					'key'   => $k,
+					'label' => $lab,
+					'diff'  => $diff,
+					'score' => $fv,
+				);
+			}
+			usort(
+				$vals,
+				static function ( $a, $b ) {
+					return $b <=> $a;
+				}
+			);
+			$axis_rank = count( $vals );
+			foreach ( $vals as $vi => $v ) {
+				if ( $v <= $fv + 0.05 ) {
+					$axis_rank = $vi + 1;
+					break;
+				}
+			}
+			$axis_ranks[ $k ] = array(
+				'label' => $lab,
+				'rank'  => $axis_rank,
+				'total' => count( $vals ),
+				'score' => $fv,
+			);
+		}
+
+		usort(
+			$stronger,
+			static function ( $a, $b ) {
+				return ( $b['diff'] ?? 0 ) <=> ( $a['diff'] ?? 0 );
+			}
+		);
+		usort(
+			$weaker,
+			static function ( $a, $b ) {
+				return ( $a['diff'] ?? 0 ) <=> ( $b['diff'] ?? 0 );
+			}
+		);
+
+		$summary = sprintf(
+			/* translators: 1: country, 2: peer scope, 3: composite, 4: rank, 5: total, 6: tier */
+			__(
+				'%1$s в %2$s: взвешенный балл %3$s — %4$d-е место из %5$d, итоговый уровень «%6$s».',
+				'worldstat-ergonomics'
+			),
+			$name,
+			$peer_scope,
+			number_format( $composite_focus, 1, ',', ' ' ),
+			$rank,
+			$total,
+			$tier_label
+		);
+
+		if ( null !== $delta_composite && abs( $delta_composite ) >= 1.0 ) {
+			if ( $delta_composite > 0 ) {
+				$summary .= ' ' . sprintf(
+					/* translators: 1: pp above median */
+					__( 'Выше медианы выборки на %1$s п.п.', 'worldstat-ergonomics' ),
+					number_format( $delta_composite, 1, ',', ' ' )
+				);
+			} else {
+				$summary .= ' ' . sprintf(
+					/* translators: 1: pp below median */
+					__( 'Ниже медианы выборки на %1$s п.п.', 'worldstat-ergonomics' ),
+					number_format( abs( $delta_composite ), 1, ',', ' ' )
+				);
+			}
+		}
+
+		$insights = array();
+
+		if ( ! $use_global_peers && count( $peer_rows ) >= 2 ) {
+			$ahead = array();
+			$behind = array();
+			foreach ( $sorted_peers as $row ) {
+				$iso = strtoupper( (string) ( $row['iso2'] ?? '' ) );
+				if ( $iso === $focus_iso2 ) {
+					continue;
+				}
+				$comp = (float) ( $row['composite'] ?? 0 );
+				if ( $comp > $composite_focus + 0.5 ) {
+					$ahead[] = (string) ( $row['name'] ?? $iso );
+				} elseif ( $comp < $composite_focus - 0.5 ) {
+					$behind[] = (string) ( $row['name'] ?? $iso );
+				}
+			}
+			if ( ! empty( $ahead ) ) {
+				$insights[] = sprintf(
+					/* translators: 1: country, 2: list */
+					__( 'Среди отмеченных выше %1$s по сводному баллу: %2$s.', 'worldstat-ergonomics' ),
+					$name,
+					implode( ', ', array_slice( $ahead, 0, 5 ) ) . ( count( $ahead ) > 5 ? '…' : '' )
+				);
+			}
+			if ( ! empty( $behind ) ) {
+				$insights[] = sprintf(
+					/* translators: 1: country, 2: list */
+					__( 'Среди отмеченных ниже %1$s по сводному баллу: %2$s.', 'worldstat-ergonomics' ),
+					$name,
+					implode( ', ', array_slice( $behind, 0, 5 ) ) . ( count( $behind ) > 5 ? '…' : '' )
+				);
+			}
+		} elseif ( $use_global_peers && $total > 1 ) {
+			$pct_better = (int) round( ( ( $total - $rank ) / max( 1, $total - 1 ) ) * 100 );
+			if ( $rank === 1 ) {
+				$insights[] = sprintf(
+					/* translators: %s: country */
+					__( '%s — лидер по взвешенному баллу в глобальной выборке.', 'worldstat-ergonomics' ),
+					$name
+				);
+			} elseif ( $rank === $total ) {
+				$insights[] = sprintf(
+					/* translators: %s: country */
+					__( '%s — наименьший взвешенный балл в глобальной выборке.', 'worldstat-ergonomics' ),
+					$name
+				);
+			} else {
+				$insights[] = sprintf(
+					/* translators: 1: country, 2: percent */
+					__( '%1$s опережает примерно %2$d%% стран выборки по сводному баллу.', 'worldstat-ergonomics' ),
+					$name,
+					$pct_better
+				);
+			}
+		}
+
+		if ( ! empty( $stronger ) ) {
+			$parts = array();
+			foreach ( array_slice( $stronger, 0, 3 ) as $s ) {
+				$parts[] = sprintf(
+					'%s (+%s)',
+					$s['label'],
+					number_format( (float) $s['diff'], 1, ',', ' ' )
+				);
+			}
+			$insights[] = sprintf(
+				/* translators: 1: country, 2: axes list */
+				__( '%1$s сильнее медианы выборки по осям: %2$s.', 'worldstat-ergonomics' ),
+				$name,
+				implode( '; ', $parts )
+			);
+		}
+		if ( ! empty( $weaker ) ) {
+			$parts = array();
+			foreach ( array_slice( $weaker, 0, 3 ) as $w ) {
+				$parts[] = sprintf(
+					'%s (%s)',
+					$w['label'],
+					number_format( (float) $w['diff'], 1, ',', ' ' )
+				);
+			}
+			$insights[] = sprintf(
+				/* translators: 1: country, 2: axes list */
+				__( '%1$s слабее медианы выборки по осям: %2$s.', 'worldstat-ergonomics' ),
+				$name,
+				implode( '; ', $parts )
+			);
+		}
+
+		$limiting = (array) ( $focus['limiting_labels'] ?? array() );
+		if ( ! empty( $limiting ) ) {
+			$insights[] = sprintf(
+				/* translators: 1: country, 2: axes */
+				__(
+					'Итоговый уровень «%3$s» для %1$s ограничен осями, слабее итога: %2$s — на шкалах эти точки левее соседей с более высоким баллом.',
+					'worldstat-ergonomics'
+				),
+				$name,
+				implode( ', ', $limiting ),
+				$tier_label
+			);
+		}
+
+		if ( ! empty( $axis_ranks ) ) {
+			$best_k  = null;
+			$worst_k = null;
+			foreach ( $axis_ranks as $k => $ar ) {
+				if ( null === $best_k || (int) $ar['rank'] < (int) $axis_ranks[ $best_k ]['rank'] ) {
+					$best_k = $k;
+				}
+				if ( null === $worst_k || (int) $ar['rank'] > (int) $axis_ranks[ $worst_k ]['rank'] ) {
+					$worst_k = $k;
+				}
+			}
+			if ( is_string( $best_k ) && is_string( $worst_k ) && $best_k !== $worst_k ) {
+				$insights[] = sprintf(
+					/* translators: 1: country, 2: best axis, 3: rank, 4: total, 5: worst axis, 6: rank, 7: total */
+					__(
+						'В %8$s по рангу баллов %1$s: лучше всего %2$s (%3$d из %4$d), слабее всего %5$s (%6$d из %7$d).',
+						'worldstat-ergonomics'
+					),
+					$name,
+					$axis_ranks[ $best_k ]['label'],
+					(int) $axis_ranks[ $best_k ]['rank'],
+					(int) $axis_ranks[ $best_k ]['total'],
+					$axis_ranks[ $worst_k ]['label'],
+					(int) $axis_ranks[ $worst_k ]['rank'],
+					(int) $axis_ranks[ $worst_k ]['total'],
+					$peer_scope
+				);
+			}
+		}
+
+		$at = isset( $focus['axis_tiers'] ) && is_array( $focus['axis_tiers'] ) ? $focus['axis_tiers'] : array();
+		$tier_spread = array();
+		foreach ( self::CRITERIA_KEYS as $k ) {
+			if ( ! empty( $at[ $k ]['label'] ) ) {
+				$tier_spread[ (string) $at[ $k ]['label'] ] = ( $tier_spread[ (string) $at[ $k ]['label'] ] ?? 0 ) + 1;
+			}
+		}
+		$dominant_tiers = array();
+		if ( ! empty( $tier_spread ) ) {
+			$dominant_tiers = array_keys( $tier_spread, max( $tier_spread ) );
+		}
+		if ( count( $dominant_tiers ) === 1 && $dominant_tiers[0] !== $tier_label ) {
+			$insights[] = sprintf(
+				/* translators: 1: country, 2: tier note */
+				__( 'По отдельным осям у %1$s чаще встречается уровень «%2$s», чем итоговый «%3$s» — профиль неоднородный.', 'worldstat-ergonomics' ),
+				$name,
+				$dominant_tiers[0],
+				$tier_label
+			);
+		}
+
+		$highlights = array(
+			array(
+				'label' => __( 'Место по сводному баллу', 'worldstat-ergonomics' ),
+				'value' => $rank . ' / ' . $total,
+			),
+			array(
+				'label' => __( 'Взвешенный балл', 'worldstat-ergonomics' ),
+				'value' => number_format( $composite_focus, 1, ',', ' ' ),
+			),
+			array(
+				'label' => __( 'Итоговый уровень', 'worldstat-ergonomics' ),
+				'value' => $tier_label,
+			),
+		);
+		if ( null !== $median_composite ) {
+			$highlights[] = array(
+				'label' => __( 'Медиана выборки', 'worldstat-ergonomics' ),
+				'value' => number_format( $median_composite, 1, ',', ' ' ),
+			);
+		}
+		if ( ! empty( $stronger ) ) {
+			$highlights[] = array(
+				'label' => __( 'Сильнее медианы', 'worldstat-ergonomics' ),
+				'value' => $stronger[0]['label'],
+			);
+		}
+		if ( ! empty( $weaker ) ) {
+			$highlights[] = array(
+				'label' => __( 'Слабее медианы', 'worldstat-ergonomics' ),
+				'value' => $weaker[0]['label'],
+			);
+		}
+
+		return array(
+			'summary'    => $summary,
+			'highlights' => $highlights,
+			'insights'   => $insights,
+		);
+	}
+
+	/**
+	 * @return array{slug:string,label:string,color:string}
+	 */
+	public static function tier_meta_public( string $slug ): array {
+		return self::tier_meta( $slug );
 	}
 
 	/**

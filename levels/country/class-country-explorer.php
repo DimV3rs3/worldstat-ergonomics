@@ -11,10 +11,72 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class WSErgo_Country_Explorer {
 
-	public static function enqueue_assets( int $reference_post_id ): void {
-		if ( class_exists( 'WorldStat_UI' ) ) {
-			WorldStat_UI::enqueue_chart_scripts();
+	/** @var bool */
+	private static $classification_assets_enqueued = false;
+
+	/**
+	 * Классификация по осям (плагин эргономичности и классификатор).
+	 */
+	public static function is_classification_available(): bool {
+		return function_exists( 'wsergo_classification_is_available' ) && wsergo_classification_is_available();
+	}
+
+	/**
+	 * Текст при недоступной классификации.
+	 */
+	public static function classification_unavailable_message(): string {
+		if ( function_exists( 'wsergo_classification_unavailable_message' ) ) {
+			return wsergo_classification_unavailable_message();
 		}
+		return __( 'Классификация по уровням эргономичности недоступна: необходим плагин WorldStat Ergonomics.', 'worldstat-ergonomics' );
+	}
+
+	/**
+	 * Блок-предупреждение вместо шкал и таблицы классификации.
+	 */
+	public static function render_classification_unavailable_notice( string $extra_class = '' ): void {
+		$class = 'wsergo-classification-unavailable wsp-ca-notice';
+		if ( $extra_class !== '' ) {
+			$class .= ' ' . sanitize_html_class( $extra_class );
+		}
+		echo '<div class="' . esc_attr( $class ) . '" role="status">';
+		echo '<p class="wsergo-classification-unavailable__text">' . esc_html( self::classification_unavailable_message() ) . '</p>';
+		echo '</div>';
+	}
+
+	/**
+	 * @return array<string, string>
+	 */
+	public static function classification_i18n(): array {
+		return array(
+			'running'       => __( 'Расчёт…', 'worldstat-ergonomics' ),
+			'error'         => __( 'Ошибка', 'worldstat-ergonomics' ),
+			'networkError'  => __( 'Ошибка сети. Попробуйте снова.', 'worldstat-ergonomics' ),
+			'ladderTitle'   => __( 'Шкалы классификации по критериям', 'worldstat-ergonomics' ),
+			'ladderHint'    => __( 'Шкала 0–100: цвет точки — уровень по оси; наведите — страна и балл.', 'worldstat-ergonomics' ),
+			'ladderHintErgo' => __( 'Шкала 0–100: одна точка на оси — балл этой страны; цвет — уровень по критерию.', 'worldstat-ergonomics' ),
+			'scoreLabel'    => __( 'Балл', 'worldstat-ergonomics' ),
+			'levelLabel'    => __( 'Уровень', 'worldstat-ergonomics' ),
+			'scatterTitle'  => __( 'Положение страны по двум осям', 'worldstat-ergonomics' ),
+			'scatterHint'   => __( 'Выберите разные оси. Точки — все страны выборки; выделена страна страницы.', 'worldstat-ergonomics' ),
+			'axisX'         => __( 'Ось X', 'worldstat-ergonomics' ),
+			'axisY'         => __( 'Ось Y', 'worldstat-ergonomics' ),
+			'ergoIndex'     => __( 'Сводный балл', 'worldstat-ergonomics' ),
+			'sameAxisError' => __( 'Выберите разные оси.', 'worldstat-ergonomics' ),
+			'clsVisTitle'   => __( 'Аналитика классификации', 'worldstat-ergonomics' ),
+			'clsErgoTitle'  => __( 'Аналитика классификации страны', 'worldstat-ergonomics' ),
+			'showUnselectedOnCharts' => __( 'Показывать невыбранные страны на шкалах и графике', 'worldstat-ergonomics' ),
+		);
+	}
+
+	/**
+	 * Стили и JS шкал/графика классификации (вкладки «Эргономичность» и «Сравнение»).
+	 */
+	public static function enqueue_classification_assets(): void {
+		if ( self::$classification_assets_enqueued ) {
+			return;
+		}
+		self::$classification_assets_enqueued = true;
 
 		$deps_css = array();
 		if ( wp_style_is( 'worldstat-platform', 'registered' ) || wp_style_is( 'worldstat-platform', 'enqueued' ) ) {
@@ -22,6 +84,58 @@ class WSErgo_Country_Explorer {
 		}
 		if ( wp_style_is( 'worldstat-country-analytics', 'registered' ) || wp_style_is( 'worldstat-country-analytics', 'enqueued' ) ) {
 			$deps_css[] = 'worldstat-country-analytics';
+		}
+
+		$css_rel = 'public/assets/css/ergo-country-public.css';
+		if ( ! wp_style_is( 'wsergo-country-public', 'enqueued' ) && ! wp_style_is( 'wsergo-country-public', 'done' ) ) {
+			wp_enqueue_style(
+				'wsergo-country-public',
+				class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::url( 'country', $css_rel ) : WSERGO_URL . 'levels/country/' . $css_rel,
+				$deps_css,
+				class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $css_rel ) : WSERGO_VERSION
+			);
+		}
+
+		$ladder_handle = 'wsergo-country-classification-ladder';
+		if ( ! wp_script_is( $ladder_handle, 'registered' ) && ! wp_script_is( $ladder_handle, 'enqueued' ) ) {
+			wp_register_script(
+				$ladder_handle,
+				class_exists( 'WSErgo_Level_Registry' )
+					? WSErgo_Level_Registry::url( 'country', 'public/assets/js/wsergo-country-classification-ladder.js' )
+					: WSERGO_URL . 'levels/country/public/assets/js/wsergo-country-classification-ladder.js',
+				array( 'jquery' ),
+				class_exists( 'WSErgo_Level_Registry' )
+					? WSErgo_Level_Registry::asset_version( 'country', 'public/assets/js/wsergo-country-classification-ladder.js' )
+					: WSERGO_VERSION,
+				true
+			);
+		}
+
+		if ( ! wp_script_is( $ladder_handle, 'enqueued' ) ) {
+			wp_enqueue_script( $ladder_handle );
+		}
+
+		if ( ! wp_script_is( $ladder_handle, 'done' ) ) {
+			wp_localize_script(
+				$ladder_handle,
+				'wsergoCountryClassification',
+				array(
+					'ajaxUrl'                => admin_url( 'admin-ajax.php' ),
+					'nonce'                  => wp_create_nonce( 'wsergo_country_compare' ),
+					'classificationAction'   => 'wsergo_country_classification_analysis',
+					'i18n'                   => self::classification_i18n(),
+				)
+			);
+		}
+	}
+
+	public static function enqueue_assets( int $reference_post_id ): void {
+		if ( class_exists( 'WorldStat_UI' ) ) {
+			WorldStat_UI::enqueue_chart_scripts();
+		}
+
+		if ( wp_style_is( 'worldstat-country-analytics', 'registered' ) || wp_style_is( 'worldstat-country-analytics', 'enqueued' ) ) {
+			// already loaded
 		} else {
 			wp_enqueue_style(
 				'worldstat-country-analytics',
@@ -31,13 +145,7 @@ class WSErgo_Country_Explorer {
 			);
 		}
 
-		$css_rel = 'public/assets/css/ergo-country-public.css';
-		wp_enqueue_style(
-			'wsergo-country-public',
-			class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::url( 'country', $css_rel ) : WSERGO_URL . 'levels/country/' . $css_rel,
-			$deps_css,
-			class_exists( 'WSErgo_Level_Registry' ) ? WSErgo_Level_Registry::asset_version( 'country', $css_rel ) : WSERGO_VERSION
-		);
+		self::enqueue_classification_assets();
 
 		$js_deps = array( 'jquery' );
 		if ( wp_script_is( 'worldstat-chart-builder', 'registered' ) ) {
@@ -65,38 +173,72 @@ class WSErgo_Country_Explorer {
 			? WSErgo_Country_Compare_Trends::get_metric_options_for_post( $post_id )
 			: array();
 
+		$compare_i18n = array_merge(
+			self::classification_i18n(),
+			array(
+				'done'              => __( 'Готово', 'worldstat-ergonomics' ),
+				'pickMetric'        => __( 'Выберите показатель из CSV страны.', 'worldstat-ergonomics' ),
+				'pickCountry'       => __( 'Отметьте страны в таблице.', 'worldstat-ergonomics' ),
+				'r2'                => __( 'R²', 'worldstat-ergonomics' ),
+				'trend'             => __( 'Тренд', 'worldstat-ergonomics' ),
+				'forecast'          => __( 'Прогноз', 'worldstat-ergonomics' ),
+				'year'              => __( 'г.', 'worldstat-ergonomics' ),
+				'calculate'         => __( 'Построить график', 'worldstat-ergonomics' ),
+				'selected'          => __( 'Выбрано стран', 'worldstat-ergonomics' ),
+				'viewCombined'      => __( 'Совмещённый', 'worldstat-ergonomics' ),
+				'viewSeparate'      => __( 'Отдельные графики', 'worldstat-ergonomics' ),
+				'legendTitle'       => __( 'Серии (цвета)', 'worldstat-ergonomics' ),
+				'analysisTitle'     => __( 'Аналитический вывод по показателю', 'worldstat-ergonomics' ),
+				'ergoAnalysisTitle' => __( 'Классификация эргономичности', 'worldstat-ergonomics' ),
+				'statsTitle'        => __( 'Показатели по странам', 'worldstat-ergonomics' ),
+				'countryCol'        => __( 'Страна', 'worldstat-ergonomics' ),
+				'pctChange'         => __( 'Δ к базе, %', 'worldstat-ergonomics' ),
+				'scaleMin'          => '0',
+				'scaleMax'          => '100',
+				'scatterTitle'      => __( 'Сравнение по двум осям', 'worldstat-ergonomics' ),
+				'scatterHint'       => __( 'Выберите разные оси. Точки — страны; наведите — название и сводный балл эргономичности.', 'worldstat-ergonomics' ),
+			)
+		);
+
 		wp_localize_script(
 			'wsergo-country-compare',
 			'wsergoCountryCompare',
 			array(
-				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-				'nonce'   => wp_create_nonce( 'wsergo_country_compare' ),
-				'action'  => 'wsergo_country_compare_trends',
+				'ajaxUrl'              => admin_url( 'admin-ajax.php' ),
+				'nonce'                => wp_create_nonce( 'wsergo_country_compare' ),
+				'action'               => 'wsergo_country_compare_trends',
 				'classificationAction' => 'wsergo_country_classification_analysis',
-				'metrics' => $metrics,
-				'i18n'    => array(
-					'running'       => __( 'Расчёт…', 'worldstat-ergonomics' ),
-					'error'         => __( 'Ошибка', 'worldstat-ergonomics' ),
-					'done'          => __( 'Готово', 'worldstat-ergonomics' ),
-					'pickMetric'    => __( 'Выберите показатель из CSV страны.', 'worldstat-ergonomics' ),
-					'pickCountry'   => __( 'Отметьте страны в таблице.', 'worldstat-ergonomics' ),
-					'r2'            => __( 'R²', 'worldstat-ergonomics' ),
-					'trend'         => __( 'Тренд', 'worldstat-ergonomics' ),
-					'forecast'      => __( 'Прогноз', 'worldstat-ergonomics' ),
-					'year'          => __( 'г.', 'worldstat-ergonomics' ),
-					'networkError'  => __( 'Ошибка сети. Попробуйте снова.', 'worldstat-ergonomics' ),
-					'calculate'     => __( 'Построить график', 'worldstat-ergonomics' ),
-					'selected'      => __( 'Выбрано стран', 'worldstat-ergonomics' ),
-					'viewCombined'  => __( 'Совмещённый', 'worldstat-ergonomics' ),
-					'viewSeparate'  => __( 'Отдельные графики', 'worldstat-ergonomics' ),
-					'legendTitle'   => __( 'Серии (цвета)', 'worldstat-ergonomics' ),
-					'analysisTitle' => __( 'Аналитический вывод по показателю', 'worldstat-ergonomics' ),
-					'ergoAnalysisTitle' => __( 'Классификация эргономичности', 'worldstat-ergonomics' ),
-					'statsTitle'    => __( 'Показатели по странам', 'worldstat-ergonomics' ),
-					'countryCol'    => __( 'Страна', 'worldstat-ergonomics' ),
-					'pctChange'     => __( 'Δ к базе, %', 'worldstat-ergonomics' ),
-				),
+				'metrics'              => $metrics,
+				'i18n'                 => $compare_i18n,
 			)
+		);
+	}
+
+	/**
+	 * Payload для вкладки «Эргономичность»: одна страна, шкалы без 2D-графика.
+	 *
+	 * @return array<string, mixed>
+	 */
+	public static function build_ergo_tab_classification_payload( string $iso2 ): array {
+		$iso2 = strtoupper( sanitize_text_field( $iso2 ) );
+		if ( ! self::is_classification_available() ) {
+			return array(
+				'highlight_iso2'        => $iso2,
+				'ladder_single_country' => true,
+				'ladder_chart'          => array(),
+				'classification_visual' => array(),
+			);
+		}
+
+		return array(
+			'highlight_iso2'        => $iso2,
+			'ladder_single_country' => true,
+			'ladder_chart'          => class_exists( 'WSErgo_Tier_Classifier' )
+				? WSErgo_Tier_Classifier::build_axis_ladder_chart_payload( $iso2, true )
+				: array(),
+			'classification_visual' => class_exists( 'WSErgo_Tier_Classifier' )
+				? WSErgo_Tier_Classifier::build_classification_visual_analysis( array( $iso2 ), $iso2 )
+				: array(),
 		);
 	}
 
@@ -105,16 +247,32 @@ class WSErgo_Country_Explorer {
 	 */
 	public static function build_payload( string $highlight_iso2 ): array {
 		$highlight_iso2 = strtoupper( sanitize_text_field( $highlight_iso2 ) );
-		$classification = class_exists( 'WSErgo_Tier_Classifier' )
-			? WSErgo_Tier_Classifier::get_global_classification_rows()
-			: array();
-		$axis_labels    = class_exists( 'WSErgo_Tier_Classifier' ) ? WSErgo_Tier_Classifier::axis_labels_ru() : array();
+		if ( ! self::is_classification_available() ) {
+			return array(
+				'highlight_iso2'        => $highlight_iso2,
+				'classification'        => array(),
+				'axis_labels'           => array(),
+				'axis_keys'             => array(),
+				'ladder_chart'          => array(),
+				'scatter_chart'         => array(),
+				'classification_visual' => array(),
+			);
+		}
+		$classification = WSErgo_Tier_Classifier::get_global_classification_rows();
+		$axis_labels = WSErgo_Tier_Classifier::axis_labels_ru();
+
+		$ladder  = WSErgo_Tier_Classifier::build_axis_ladder_chart_payload( $highlight_iso2 );
+		$scatter = WSErgo_Tier_Classifier::build_scatter_chart_payload( $highlight_iso2 );
+		$cls_vis = WSErgo_Tier_Classifier::build_classification_visual_analysis( array( $highlight_iso2 ), $highlight_iso2 );
 
 		return array(
-			'highlight_iso2' => $highlight_iso2,
-			'classification' => $classification,
-			'axis_labels'    => $axis_labels,
-			'axis_keys'      => class_exists( 'WSErgo_Tier_Classifier' ) ? WSErgo_Tier_Classifier::SCORE_KEYS : array(),
+			'highlight_iso2'        => $highlight_iso2,
+			'classification'        => $classification,
+			'axis_labels'           => $axis_labels,
+			'axis_keys'             => WSErgo_Tier_Classifier::SCORE_KEYS,
+			'ladder_chart'          => $ladder,
+			'scatter_chart'         => $scatter,
+			'classification_visual' => $cls_vis,
 		);
 	}
 
@@ -194,19 +352,36 @@ class WSErgo_Country_Explorer {
 	 * @param array<string, mixed> $payload
 	 */
 	private static function render_classification_table( array $payload, string $highlight_iso2, string $uid ): void {
+		echo '<div class="wsergo-country-classification-wrap">';
+		echo '<h4 class="wsergo-city-explorer__section-title">' . esc_html__( 'Классификация по критериям эргономичности', 'worldstat-ergonomics' ) . '</h4>';
+
+		if ( ! self::is_classification_available() ) {
+			self::render_classification_unavailable_notice();
+			echo '</div>';
+			return;
+		}
+
 		$rows = isset( $payload['classification'] ) && is_array( $payload['classification'] ) ? $payload['classification'] : array();
 		if ( empty( $rows ) ) {
 			echo '<p class="wsp-muted">' . esc_html__( 'Нет данных для классификации стран.', 'worldstat-ergonomics' ) . '</p>';
+			echo '</div>';
 			return;
 		}
 
 		$axis_keys = isset( $payload['axis_keys'] ) && is_array( $payload['axis_keys'] ) ? $payload['axis_keys'] : array();
 		$labels    = isset( $payload['axis_labels'] ) && is_array( $payload['axis_labels'] ) ? $payload['axis_labels'] : array();
 
-		echo '<div class="wsergo-country-classification-wrap">';
-		echo '<h4 class="wsergo-city-explorer__section-title">' . esc_html__( 'Классификация по критериям эргономичности', 'worldstat-ergonomics' ) . '</h4>';
-		echo '<p class="wsp-muted">' . esc_html__( 'В таблице — только страны (без региональных агрегатов CSV вроде CEB, EMU). Уровень по оси — относительно глобальной выборки. Отметьте страны — ниже появятся краткие выводы.', 'worldstat-ergonomics' ) . '</p>';
-		echo '<div class="wsergo-country-classification-analysis" id="' . esc_attr( $uid ) . '-cls-analysis" aria-live="polite"></div>';
+		echo '<p class="wsp-muted">' . esc_html__( 'В таблице — только страны (без региональных агрегатов CSV вроде CEB, EMU). Шкалы и график — баллы 0–100. Отметьте страны для уточнения выводов.', 'worldstat-ergonomics' ) . '</p>';
+		echo '<div class="wsergo-country-classification-analysis wsergo-cls-visual-analysis" id="' . esc_attr( $uid ) . '-cls-analysis" aria-live="polite"></div>';
+		echo '<div class="wsergo-country-compare-chart-filter" data-explorer="' . esc_attr( $uid ) . '">';
+		printf(
+			'<label class="wsergo-country-compare-show-unselected-label"><input type="checkbox" class="wsergo-country-compare-show-unselected" data-explorer="%1$s" checked="checked" /> %2$s</label>',
+			esc_attr( $uid ),
+			esc_html__( 'Показывать невыбранные страны на шкалах и графике', 'worldstat-ergonomics' )
+		);
+		echo '</div>';
+		echo '<div class="wsergo-cls-scatter-wrap" id="' . esc_attr( $uid ) . '-cls-scatter" data-explorer="' . esc_attr( $uid ) . '" aria-live="polite"></div>';
+		echo '<div class="wsergo-cls-ladder-wrap" id="' . esc_attr( $uid ) . '-cls-ladder" data-explorer="' . esc_attr( $uid ) . '" aria-live="polite"></div>';
 
 		echo '<div class="wsergo-country-compare-toolbar" data-explorer="' . esc_attr( $uid ) . '">';
 		echo '<button type="button" class="wsp-btn-link wsergo-country-compare-select-all" data-explorer="' . esc_attr( $uid ) . '">' . esc_html__( 'Выбрать все', 'worldstat-ergonomics' ) . '</button>';

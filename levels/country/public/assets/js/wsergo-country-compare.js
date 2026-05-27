@@ -104,41 +104,14 @@
 		return $('#' + id + '-cls-analysis');
 	}
 
-	function refreshClassificationAnalysis($root) {
-		var $host = classificationAnalysisHost($root);
-		if (!$host.length) {
-			return;
-		}
-		var iso2 = selectedIso2($root);
-		var c = cfg();
-		var action = c.classificationAction || 'wsergo_country_classification_analysis';
-		if (!iso2.length) {
-			$host.empty().append('<p class="wsp-muted">' + esc(i18n('pickCountry', 'Отметьте страны в таблице.')) + '</p>');
-			return;
-		}
-		$host.html('<p class="wsp-muted">' + esc(i18n('running', 'Расчёт…')) + '</p>');
-		$.post(c.ajaxUrl || '', {
-			action: action,
-			nonce: c.nonce || '',
-			iso2: iso2
-		}).done(function (res) {
-			$host.empty();
-			if (res && res.success && res.data) {
-				renderAnalysis($host, res.data, 'wsergo-compare-analysis--ergo');
-			} else {
-				$host.append('<p class="wsp-muted">' + esc((res && res.data && res.data.message) ? res.data.message : i18n('error', 'Ошибка')) + '</p>');
-			}
-		}).fail(function (xhr) {
-			$host.empty().append('<p class="wsp-muted">' + esc(ajaxErrorMessage(xhr, i18n('error', 'Ошибка'))) + '</p>');
-		});
-	}
-
 	function scheduleClassificationAnalysis($root) {
 		if (clsAnalysisTimer) {
 			clearTimeout(clsAnalysisTimer);
 		}
 		clsAnalysisTimer = setTimeout(function () {
-			refreshClassificationAnalysis($root);
+			if (window.wsergoCountryClassificationLadderRefresh) {
+				window.wsergoCountryClassificationLadderRefresh($root);
+			}
 		}, 280);
 	}
 
@@ -430,7 +403,9 @@
 		}
 		$root.attr('data-wsergo-compare-ready', '1');
 		updateSelectionStatus($root);
-		scheduleClassificationAnalysis($root);
+		if (window.wsergoCountryClassificationLadderRefresh) {
+			window.wsergoCountryClassificationLadderRefresh($root);
+		}
 	}
 
 	function scan(ctx) {

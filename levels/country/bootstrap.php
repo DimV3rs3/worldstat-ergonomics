@@ -9,6 +9,20 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+/**
+ * Доступна ли классификация по осям эргономичности (нужны классы плагина).
+ */
+function wsergo_classification_is_available(): bool {
+	return class_exists( 'WSErgo_Tier_Classifier' ) && class_exists( 'WSErgo_Settings' );
+}
+
+/**
+ * Сообщение, если модуль классификации не загружен (плагин повреждён или отключена часть кода).
+ */
+function wsergo_classification_unavailable_message(): string {
+	return __( 'Классификация по уровням эргономичности недоступна: не загружен модуль классификации плагина WorldStat Ergonomics. Установите или активируйте плагин и обновите страницу.', 'worldstat-ergonomics' );
+}
+
 add_action( 'wp_enqueue_scripts', [ 'WSErgo_Country_Renderer', 'enqueue_public_assets' ], 20 );
 add_action( 'wp_enqueue_scripts', 'wsergo_enqueue_country_tab_link_script', 25 );
 
@@ -48,12 +62,34 @@ function wsergo_country_ajax_classification_analysis(): void {
 	}
 	$iso2_raw = isset( $_POST['iso2'] ) ? wp_unslash( $_POST['iso2'] ) : array();
 	$iso2_list = is_array( $iso2_raw ) ? $iso2_raw : array( $iso2_raw );
-	if ( ! class_exists( 'WSErgo_Tier_Classifier' ) ) {
-		wp_send_json_error( array( 'message' => __( 'Классификатор недоступен.', 'worldstat-ergonomics' ) ) );
+	if ( ! wsergo_classification_is_available() ) {
+		wp_send_json_error( array( 'message' => wsergo_classification_unavailable_message() ) );
 	}
-	wp_send_json_success(
-		WSErgo_Tier_Classifier::build_compare_classification_analysis( $iso2_list )
-	);
+	$visual = isset( $_POST['visual'] ) && (string) wp_unslash( $_POST['visual'] ) === '1';
+	try {
+		if ( $visual ) {
+			$page_iso2 = isset( $_POST['page_iso2'] ) ? sanitize_text_field( (string) wp_unslash( $_POST['page_iso2'] ) ) : '';
+			$data    = WSErgo_Tier_Classifier::build_classification_visual_analysis( $iso2_list, $page_iso2 );
+		} else {
+			$data = WSErgo_Tier_Classifier::build_compare_classification_analysis( $iso2_list );
+		}
+	} catch ( Throwable $e ) {
+		if ( function_exists( 'wsergo_country_discard_ajax_output_buffer' ) ) {
+			wsergo_country_discard_ajax_output_buffer();
+		}
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+			error_log( 'wsergo_country_classification_analysis: ' . $e->getMessage() );
+		}
+		wp_send_json_error(
+			array(
+				'message' => __( 'Ошибка расчёта аналитики. Обновите страницу.', 'worldstat-ergonomics' ),
+			)
+		);
+	}
+	if ( function_exists( 'wsergo_country_discard_ajax_output_buffer' ) ) {
+		wsergo_country_discard_ajax_output_buffer();
+	}
+	wp_send_json_success( $data );
 }
 add_action( 'wp_ajax_wsergo_load_country_city_macro', [ 'WSErgo_Country_Renderer', 'ajax_load_country_city_macro' ] );
 add_action( 'wp_ajax_nopriv_wsergo_load_country_city_macro', [ 'WSErgo_Country_Renderer', 'ajax_load_country_city_macro' ] );

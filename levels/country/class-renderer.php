@@ -87,43 +87,99 @@ class WSErgo_Country_Renderer {
 	}
 
 	/**
-	 * Краткая классификация текущей страны (всегда на вкладке «Эргономичность»).
+	 * Классификация страны на вкладке «Эргономичность»: шкалы (одна точка на ось) и аналитика.
 	 */
 	private static function render_country_classification_summary( string $iso2 ): void {
-		if ( ! class_exists( 'WSErgo_Tier_Classifier' ) || ! class_exists( 'WSErgo_Settings' ) ) {
+		if ( ! class_exists( 'WSErgo_Settings' ) ) {
 			return;
 		}
 		if ( WSErgo_Settings::get_country_index_source() !== 'macro_datasets' ) {
 			return;
 		}
+		if ( ! class_exists( 'WSErgo_Country_Explorer' ) ) {
+			return;
+		}
+
+		$iso2 = strtoupper( sanitize_text_field( $iso2 ) );
+
+		echo '<section class="wsergo-country-classification-summary">';
+		echo '<h4 class="wsp-section-title" style="margin-top:0;">' . esc_html__( 'Классификация по уровням эргономичности', 'worldstat-ergonomics' ) . '</h4>';
+
+		if ( ! WSErgo_Country_Explorer::is_classification_available() ) {
+			WSErgo_Country_Explorer::render_classification_unavailable_notice();
+			echo '</section>';
+			return;
+		}
 		$tier = WSErgo_Tier_Classifier::get_tier_for_iso2( $iso2 );
 		if ( ! is_array( $tier ) || empty( $tier['label'] ) || ( $tier['label'] ?? '' ) === '—' ) {
 			echo '<p class="wsp-muted">' . esc_html__( 'Классификация по осям эргономичности: нет данных CSV для этой страны.', 'worldstat-ergonomics' ) . '</p>';
+			echo '</section>';
 			return;
 		}
-		$slug = sanitize_key( (string) ( $tier['slug'] ?? '' ) );
-		$labels = WSErgo_Tier_Classifier::axis_labels_ru();
-		echo '<section class="wsergo-country-classification-summary">';
-		echo '<h4 class="wsp-section-title" style="margin-top:0;">' . esc_html__( 'Классификация по уровням эргономичности', 'worldstat-ergonomics' ) . '</h4>';
-		echo '<p class="wsp-muted">' . esc_html__( 'Уровень и баллы по осям E, F, Cm, H, A, S, Ct (перцентили по всем странам). Полный рейтинг и график регрессии — на вкладке «Сравнение».', 'worldstat-ergonomics' ) . '</p>';
+
+		WSErgo_Country_Explorer::enqueue_classification_assets();
+
+		$payload = WSErgo_Country_Explorer::build_ergo_tab_classification_payload( $iso2 );
+		$uid     = 'wsergo-country-cls-' . ( function_exists( 'wp_unique_id' ) ? wp_unique_id() : uniqid( '', true ) );
+		$slug    = sanitize_key( (string) ( $tier['slug'] ?? '' ) );
+		$labels  = WSErgo_Tier_Classifier::axis_labels_ru();
+
+		$row_axis_tiers = array();
+		foreach ( WSErgo_Tier_Classifier::get_global_classification_rows() as $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			if ( strtoupper( (string) ( $row['iso2'] ?? '' ) ) === $iso2 ) {
+				$row_axis_tiers = isset( $row['axis_tiers'] ) && is_array( $row['axis_tiers'] ) ? $row['axis_tiers'] : array();
+				break;
+			}
+		}
+
+		echo '<div id="' . esc_attr( $uid ) . '" data-wsergo-country-classification="1" data-cls-analysis-title="clsErgoTitle" data-cls-ladder-hint="ladderHintErgo">';
+		echo '<p class="wsp-muted">' . esc_html__( 'Шесть критериев F, Cm, H, A, S, Ct и сводный уровень — в перцентилях по всем странам с данными CSV. Ниже — балл этой страны на каждой шкале и текстовый вывод; сравнение с другими странами — на вкладке «Сравнение».', 'worldstat-ergonomics' ) . '</p>';
+
 		echo '<p class="wsergo-country-classification-summary__tier">';
 		echo '<span class="wsergo-tier-badge wsergo-tier-badge--' . esc_attr( $slug ) . '">' . esc_html( (string) $tier['label'] ) . '</span>';
 		if ( isset( $tier['composite'] ) ) {
 			echo ' <span class="wsp-muted">' . esc_html__( 'Сводный балл', 'worldstat-ergonomics' ) . ': <strong>' . esc_html( (string) $tier['composite'] ) . '</strong></span>';
 		}
 		echo '</p>';
+
 		if ( ! empty( $tier['axes'] ) && is_array( $tier['axes'] ) ) {
-			echo '<div class="wsp-table-wrap wsergo-country-classification-summary__table">';
-			echo '<table class="wsp-table"><thead><tr><th>' . esc_html__( 'Ось', 'worldstat-ergonomics' ) . '</th><th>' . esc_html__( 'Балл 0–100', 'worldstat-ergonomics' ) . '</th></tr></thead><tbody>';
+			echo '<div class="wsergo-country-classification-summary__axes" role="list">';
 			foreach ( WSErgo_Tier_Classifier::SCORE_KEYS as $k ) {
 				if ( ! isset( $tier['axes'][ $k ] ) ) {
 					continue;
 				}
-				echo '<tr><td>' . esc_html( (string) ( $labels[ $k ] ?? $k ) ) . '</td><td>' . esc_html( (string) $tier['axes'][ $k ] ) . '</td></tr>';
+				$score = (string) $tier['axes'][ $k ];
+				$at    = isset( $row_axis_tiers[ $k ] ) && is_array( $row_axis_tiers[ $k ] ) ? $row_axis_tiers[ $k ] : array();
+				$asl   = sanitize_key( (string) ( $at['slug'] ?? '' ) );
+				$alab  = (string) ( $at['label'] ?? '' );
+				echo '<div class="wsergo-country-classification-summary__axis-chip" role="listitem">';
+				echo '<span class="wsergo-country-classification-summary__axis-name">' . esc_html( (string) ( $labels[ $k ] ?? $k ) ) . '</span> ';
+				echo '<strong class="wsergo-country-classification-summary__axis-score">' . esc_html( $score ) . '</strong>';
+				if ( $asl !== '' && $alab !== '' && $alab !== '—' ) {
+					echo ' <span class="wsergo-tier-badge wsergo-tier-badge--axis wsergo-tier-badge--' . esc_attr( $asl ) . '">' . esc_html( $alab ) . '</span>';
+				}
+				echo '</div>';
 			}
-			echo '</tbody></table></div>';
+			echo '</div>';
 		}
-		echo '</section>';
+
+		echo '<div class="wsergo-country-classification-analysis wsergo-cls-visual-analysis" id="' . esc_attr( $uid ) . '-cls-analysis" aria-live="polite"></div>';
+		echo '<div class="wsergo-cls-ladder-wrap" id="' . esc_attr( $uid ) . '-cls-ladder" aria-live="polite"></div>';
+
+		$json = wp_json_encode( $payload, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP );
+		if ( false === $json ) {
+			$json = '{}';
+		}
+		echo '<script type="application/json" id="' . esc_attr( $uid ) . '-json">' . $json . '</script>';
+		printf(
+			'<script>document.addEventListener("DOMContentLoaded",function(){if(window.wsergoCountryClassificationLadderRefresh){window.wsergoCountryClassificationLadderRefresh(jQuery(%s));}});if(window.wsergoCountryClassificationLadderRefresh){window.wsergoCountryClassificationLadderRefresh(jQuery(%s));}</script>',
+			wp_json_encode( '#' . $uid ),
+			wp_json_encode( '#' . $uid )
+		);
+		echo '</div></section>';
 	}
 
 	/**
@@ -233,7 +289,7 @@ class WSErgo_Country_Renderer {
 					];
 					WorldStat_UI::stats_grid( $country_stats, [ 'columns' => min( 4, count( $country_stats ) ) ] );
 					if ( is_array( $macro_country_detail ) ) {
-						self::render_country_macro_ergo_panel( $macro_country_detail, 'country' );
+						self::render_country_macro_ergo_panel( $macro_country_detail, 'country', $iso2 );
 						self::render_macro_recommendations_panel( $iso2, 'country' );
 						self::render_country_classification_summary( $iso2 );
 						self::render_compare_tab_link( $iso2 );
@@ -1135,9 +1191,17 @@ class WSErgo_Country_Renderer {
 	 * @param array<string,mixed> $detail get_country_macro_detail() или get_city_macro_detail().
 	 * @param string              $scope  'country' — настройки страны; 'city' — настройки «Эргономичность города».
 	 */
-	private static function render_country_macro_ergo_panel( array $detail, string $scope = 'country' ): void {
+	private static function render_country_macro_ergo_panel( array $detail, string $scope = 'country', string $iso2 = '' ): void {
 		$scope = ( 'city' === $scope ) ? 'city' : 'country';
+		$iso2  = strtoupper( sanitize_text_field( $iso2 ) );
 		$uid   = 'wsergo-macro-' . $scope . '-' . ( function_exists( 'wp_unique_id' ) ? wp_unique_id() : uniqid( '', true ) );
+
+		$country_tier = ( strlen( $iso2 ) === 2 && class_exists( 'WSErgo_Tier_Classifier' ) )
+			? WSErgo_Tier_Classifier::get_tier_for_iso2( $iso2 )
+			: null;
+		$axis_tiers = ( is_array( $country_tier ) && ! empty( $country_tier['axis_tiers'] ) && is_array( $country_tier['axis_tiers'] ) )
+			? $country_tier['axis_tiers']
+			: array();
 
 		$analysis_url = '';
 		if ( class_exists( 'WorldStat_Pages' ) ) {
@@ -1273,10 +1337,19 @@ class WSErgo_Country_Renderer {
 								$disp = $fmt( $vv, 1 );
 							}
 						}
+						$badge_html = '';
+						if ( isset( $axis_tiers[ $k ] ) && is_array( $axis_tiers[ $k ] ) && ! empty( $axis_tiers[ $k ]['label'] ) ) {
+							$asl = sanitize_key( (string) ( $axis_tiers[ $k ]['slug'] ?? '' ) );
+							$alab = (string) $axis_tiers[ $k ]['label'];
+							$badge_html = '<div class="ergo-stat-card__tier" style="margin-top:8px;">'
+								. '<span class="wsergo-tier-badge wsergo-tier-badge--' . esc_attr( $asl ) . '">'
+								. esc_html( $alab ) . '</span></div>';
+						}
 						printf(
-							'<div class="ergo-stat-card" style="background:#fff;border:1px solid var(--wsp-border,#e5e7eb);border-radius:12px;padding:12px;"><h4 style="margin:0 0 6px;font-size:.85rem;color:#64748b;">%s</h4><div class="value" style="font-size:1.35rem;font-weight:700;">%s</div></div>',
+							'<div class="ergo-stat-card" style="background:#fff;border:1px solid var(--wsp-border,#e5e7eb);border-radius:12px;padding:12px;"><h4 style="margin:0 0 6px;font-size:.85rem;color:#64748b;">%s</h4><div class="value" style="font-size:1.35rem;font-weight:700;">%s</div>%s</div>',
 							esc_html( $lab ),
-							esc_html( $disp )
+							esc_html( $disp ),
+							$badge_html
 						);
 					}
 					?>
@@ -1307,12 +1380,28 @@ class WSErgo_Country_Renderer {
 					<div class="wsergo-macro-view" data-wsergo-macro-view-panel="axes">
 				<div class="ergo-layout">
 					<div class="ergo-sidebar">
-						<button type="button" class="ergo-vertical-btn active" data-wsergo-macro-target="F"><span class="dashicons dashicons-chart-line"></span> <?php esc_html_e( 'Функциональность F', 'worldstat-ergonomics' ); ?></button>
-						<button type="button" class="ergo-vertical-btn" data-wsergo-macro-target="Cm"><span class="dashicons dashicons-admin-home"></span> <?php esc_html_e( 'Комфортность Cm', 'worldstat-ergonomics' ); ?></button>
-						<button type="button" class="ergo-vertical-btn" data-wsergo-macro-target="H"><span class="dashicons dashicons-groups"></span> <?php esc_html_e( 'Обитаемость H', 'worldstat-ergonomics' ); ?></button>
-						<button type="button" class="ergo-vertical-btn" data-wsergo-macro-target="A"><span class="dashicons dashicons-location-alt"></span> <?php esc_html_e( 'Освояемость A', 'worldstat-ergonomics' ); ?></button>
-						<button type="button" class="ergo-vertical-btn" data-wsergo-macro-target="S"><span class="dashicons dashicons-shield"></span> <?php esc_html_e( 'Безопасность S', 'worldstat-ergonomics' ); ?></button>
-						<button type="button" class="ergo-vertical-btn" data-wsergo-macro-target="Ct"><span class="dashicons dashicons-admin-settings"></span> <?php esc_html_e( 'Управляемость Ct', 'worldstat-ergonomics' ); ?></button>
+						<?php
+						$sidebar_axes = array(
+							'F'  => array( 'icon' => 'chart-line', 'label' => __( 'Функциональность F', 'worldstat-ergonomics' ) ),
+							'Cm' => array( 'icon' => 'admin-home', 'label' => __( 'Комфортность Cm', 'worldstat-ergonomics' ) ),
+							'H'  => array( 'icon' => 'groups', 'label' => __( 'Обитаемость H', 'worldstat-ergonomics' ) ),
+							'A'  => array( 'icon' => 'location-alt', 'label' => __( 'Освояемость A', 'worldstat-ergonomics' ) ),
+							'S'  => array( 'icon' => 'shield', 'label' => __( 'Безопасность S', 'worldstat-ergonomics' ) ),
+							'Ct' => array( 'icon' => 'admin-settings', 'label' => __( 'Управляемость Ct', 'worldstat-ergonomics' ) ),
+						);
+						$sb_i = 0;
+						foreach ( $sidebar_axes as $ax_k => $ax_meta ) :
+							$active_cls = ( 0 === $sb_i ) ? ' active' : '';
+							printf(
+								'<button type="button" class="ergo-vertical-btn%s" data-wsergo-macro-target="%s"><span class="dashicons dashicons-%s"></span> %s</button>',
+								esc_attr( $active_cls ),
+								esc_attr( $ax_k ),
+								esc_attr( (string) $ax_meta['icon'] ),
+								esc_html( (string) $ax_meta['label'] )
+							);
+							++$sb_i;
+						endforeach;
+						?>
 					</div>
 					<div class="ergo-content">
 						<?php
@@ -1655,7 +1744,7 @@ class WSErgo_Country_Renderer {
 		ob_start();
 		$detail = WSErgo_Country_Macro_Calculator::get_city_macro_detail( $iso2 );
 		if ( is_array( $detail ) ) {
-			self::render_country_macro_ergo_panel( $detail, 'city' );
+			self::render_country_macro_ergo_panel( $detail, 'city', $iso2 );
 			self::render_macro_recommendations_panel( $iso2, 'city' );
 		} else {
 			echo '<p class="wsp-muted">' . esc_html__( 'Нет данных CSV для расчёта по настройкам города.', 'worldstat-ergonomics' ) . '</p>';
