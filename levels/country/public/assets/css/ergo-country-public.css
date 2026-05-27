@@ -1207,3 +1207,232 @@
 		grid-template-columns: 1fr;
 	}
 }
+
+/* Макроблок «По осям» / «Все показатели формулы» */
+.wsergo-macro-detail-views {
+	margin-top: 0.25rem;
+}
+
+.wsergo-macro-view-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	margin: 0 0 1rem;
+	padding: 0.35rem;
+	background: #f1f5f9;
+	border-radius: 12px;
+	border: 1px solid #e2e8f0;
+}
+
+.wsergo-macro-view-tab {
+	flex: 1 1 auto;
+	min-width: 140px;
+	padding: 0.55rem 1rem;
+	border: 1px solid transparent;
+	border-radius: 10px;
+	background: transparent;
+	font-size: 0.9rem;
+	font-weight: 600;
+	color: #475569;
+	cursor: pointer;
+	transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.wsergo-macro-view-tab:hover {
+	background: #e2e8f0;
+	color: #1e293b;
+}
+
+.wsergo-macro-view-tab.active {
+	background: #fff;
+	color: #1d4ed8;
+	border-color: #cbd5e1;
+	box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.ergo-layout {
+	display: flex;
+	gap: 1.25rem;
+	min-height: 320px;
+}
+
+@media (max-width: 992px) {
+	.ergo-layout {
+		flex-direction: column;
+	}
+}
+
+.ergo-sidebar {
+	width: 240px;
+	flex-shrink: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+@media (max-width: 992px) {
+	.ergo-sidebar {
+		width: 100%;
+		flex-direction: row;
+		flex-wrap: wrap;
+	}
+}
+
+.ergo-vertical-btn {
+	background: #f8fafc;
+	border: 1px solid #e2e8f0;
+	padding: 0.65rem 0.85rem;
+	border-radius: 12px;
+	font-weight: 600;
+	font-size: 0.88rem;
+	color: #334155;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	transition: background 0.15s, border-color 0.15s, color 0.15s;
+	text-align: left;
+}
+
+.ergo-vertical-btn .dashicons {
+	color: #2563eb;
+	font-size: 18px;
+	width: 18px;
+	height: 18px;
+}
+
+.ergo-vertical-btn:hover {
+	background: #eff6ff;
+	border-color: #93c5fd;
+}
+
+.ergo-vertical-btn.active {
+	background: #2563eb;
+	color: #fff;
+	border-color: #1d4ed8;
+}
+
+.ergo-vertical-btn.active .dashicons {
+	color: #fff;
+}
+
+.ergo-content {
+	flex: 1;
+	min-width: 0;
+	background: #f8fafc;
+	border-radius: 16px;
+	padding: 1rem 1.1rem;
+	border: 1px solid #e2e8f0;
+	overflow-y: auto;
+	max-height: min(52vh, 520px);
+}
+
+.ergo-macro-panel .wsergo-macro-panel-lead {
+	margin: 0 0 0.75rem;
+	font-size: 0.92rem;
+	color: #64748b;
+	line-height: 1.45;
+}
+
+.ergo-macro-panel .wsergo-macro-kv {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.45rem;
+}
+
+.ergo-macro-panel .wsergo-macro-kv > li,
+.ergo-macro-panel .wsergo-macro-kv__row {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.65rem 0.85rem;
+	padding: 0.55rem 0.85rem;
+	background: #fff;
+	border: 1px solid #e2e8f0;
+	border-radius: 10px;
+	box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.ergo-macro-panel .wsergo-macro-kv__icon {
+	flex-shrink: 0;
+	font-size: 22px;
+	width: 22px;
+	height: 22px;
+	color: #2563eb;
+	margin-top: 1px;
+}
+
+.ergo-macro-panel .wsergo-macro-kv__body {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.ergo-macro-panel .wsergo-macro-kv__label {
+	font-size: 0.86rem;
+	font-weight: 500;
+	color: #1f2937;
+	line-height: 1.35;
+}
+
+.ergo-macro-panel .wsergo-macro-kv__meta {
+	font-size: 0.8rem;
+	color: #64748b;
+	line-height: 1.3;
+}
+
+.ergo-macro-panel .wsergo-macro-kv__val {
+	flex-shrink: 0;
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+	color: #1d4ed8;
+	font-size: 0.92rem;
+	text-align: right;
+	white-space: nowrap;
+}
+
+/* Вкладка «Все показатели формулы» — прокручиваемый список плашек */
+.wsergo-macro-formula-panel {
+	background: #f8fafc;
+	border: 1px solid #e2e8f0;
+	border-radius: 16px;
+	padding: 1rem 1.1rem;
+}
+
+.wsergo-macro-formula-scroll {
+	max-height: min(52vh, 520px);
+	overflow-y: auto;
+	overflow-x: hidden;
+	padding-right: 4px;
+	scrollbar-width: thin;
+}
+
+.wsergo-macro-formula-scroll::-webkit-scrollbar {
+	width: 6px;
+}
+
+.wsergo-macro-formula-scroll::-webkit-scrollbar-thumb {
+	background: #cbd5e1;
+	border-radius: 4px;
+}
+
+.wsergo-macro-kv--formula {
+	gap: 8px;
+}
+
+@media (max-width: 520px) {
+	.ergo-macro-panel .wsergo-macro-kv > li,
+	.ergo-macro-panel .wsergo-macro-kv__row {
+		flex-wrap: wrap;
+	}
+
+	.ergo-macro-panel .wsergo-macro-kv__val {
+		width: 100%;
+		text-align: left;
+		padding-left: 30px;
+	}
+}

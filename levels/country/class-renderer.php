@@ -229,6 +229,41 @@ class WSErgo_Country_Renderer {
 		return 2;
 	}
 
+	/**
+	 * Dashicon показателя — те же правила, что на вкладке «Обзор» (WorldStat_Data).
+	 */
+	private static function macro_raw_metric_icon( string $slug ): string {
+		$slug = sanitize_key( $slug );
+		if ( $slug === '' ) {
+			return 'chart-bar';
+		}
+		if ( class_exists( 'WorldStat_Data' ) ) {
+			return WorldStat_Data::metric_category_icon( WorldStat_Data::metric_category_from_slug( $slug ) );
+		}
+		if ( preg_match( '/health|life_exp|wash|alcohol|tobacco|infect|physician|hospital|maternal|vaccin|nutrition/', $slug ) ) {
+			return 'heart';
+		}
+		if ( preg_match( '/population|pop_|birth|death|fertility|mortality|demograph|migration|dependency|age_/', $slug ) ) {
+			return 'groups';
+		}
+		if ( preg_match( '/urban|city|metro|aggl|big_city/', $slug ) ) {
+			return 'building';
+		}
+		if ( preg_match( '/environment|forest|surface|land|climate|co2|emission|water|agricult|pm25|renewable|protected|pollut|biodivers|waste/', $slug ) ) {
+			return 'admin-site-alt3';
+		}
+		if ( preg_match( '/rail|road|transport|energy|electric|internet|broadband|mobile|infra|school|air_|digital|phone|fuel|sanitation/', $slug ) ) {
+			return 'migrate';
+		}
+		if ( preg_match( '/governance|parliament|fiscal|transparency|sdg|military|women_|oda|debt/', $slug ) ) {
+			return 'shield';
+		}
+		if ( preg_match( '/gdp|econom|trade|export|import|income|wage|unemploy|inflation|budget|tax|rent_|gni/', $slug ) ) {
+			return 'chart-line';
+		}
+		return 'chart-bar';
+	}
+
 	public static function render_country_tab( string $country_code ): void {
 		$iso2 = strtoupper( $country_code );
 		$idx  = WSErgo_Country_Data::get_country_ergo_index( $iso2 );
@@ -1196,6 +1231,8 @@ class WSErgo_Country_Renderer {
 		$iso2  = strtoupper( sanitize_text_field( $iso2 ) );
 		$uid   = 'wsergo-macro-' . $scope . '-' . ( function_exists( 'wp_unique_id' ) ? wp_unique_id() : uniqid( '', true ) );
 
+		wp_enqueue_style( 'dashicons' );
+
 		$country_tier = ( strlen( $iso2 ) === 2 && class_exists( 'WSErgo_Tier_Classifier' ) )
 			? WSErgo_Tier_Classifier::get_tier_for_iso2( $iso2 )
 			: null;
@@ -1430,9 +1467,14 @@ class WSErgo_Country_Renderer {
 									if ( $sig === '' ) {
 										continue;
 									}
-									$dec = self::macro_raw_metric_decimals( $sig );
+									$dec  = self::macro_raw_metric_decimals( $sig );
+									$icon = self::macro_raw_metric_icon( $sig );
 									?>
-								<li><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( $sig ) ); ?></span><span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw[ $sig ] ?? null, $dec ) ); ?></span></li>
+								<li>
+									<span class="wsergo-macro-kv__icon dashicons dashicons-<?php echo esc_attr( $icon ); ?>" aria-hidden="true"></span>
+									<span class="wsergo-macro-kv__body"><span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( $sig ) ); ?></span></span>
+									<span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw[ $sig ] ?? null, $dec ) ); ?></span>
+								</li>
 									<?php endforeach; ?>
 							</ul>
 							<?php endif; ?>
@@ -1442,33 +1484,41 @@ class WSErgo_Country_Renderer {
 				</div>
 					</div>
 					<div class="wsergo-macro-view" data-wsergo-macro-view-panel="themes" style="display:none;">
-						<p class="wsergo-macro-panel-lead"><?php echo esc_html( sprintf( /* translators: %d: number of unique technical indicators in the formula */ __( 'Уникальные показатели, участвующие в расчёте осей по текущей формуле из админки (%d). Для каждого указаны оси F–Ct, где он используется.', 'worldstat-ergonomics' ), (int) $n_formula_signals ) ); ?></p>
-						<ul class="wsergo-macro-kv">
-							<?php
-							foreach ( $signal_axes_map as $sig_map => $ax_keys_set ) :
-								$axes_for_sig = array_keys( $ax_keys_set );
-								usort(
-									$axes_for_sig,
-									static function ( $a, $b ) use ( $axis_order ) {
-										$ia = array_search( $a, $axis_order, true );
-										$ib = array_search( $b, $axis_order, true );
-										$ia = false === $ia ? 99 : (int) $ia;
-										$ib = false === $ib ? 99 : (int) $ib;
-										return $ia <=> $ib;
-									}
-								);
-								$axes_str      = implode( ', ', $axes_for_sig );
-								$dec_formula   = self::macro_raw_metric_decimals( $sig_map );
-								?>
-							<li>
-								<span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( $sig_map ) ); ?></span>
-								<span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw[ $sig_map ] ?? null, $dec_formula ) ); ?></span>
-								<?php if ( $axes_str !== '' ) : ?>
-								<span class="wsergo-macro-kv__meta" style="display:block;font-size:.82rem;color:#64748b;margin-top:4px;"><?php echo esc_html( sprintf( /* translators: %s: comma-separated axis codes like F, Cm */ __( 'Оси: %s', 'worldstat-ergonomics' ), $axes_str ) ); ?></span>
-								<?php endif; ?>
-							</li>
-							<?php endforeach; ?>
-						</ul>
+						<div class="ergo-macro-panel wsergo-macro-formula-panel">
+							<p class="wsergo-macro-panel-lead"><?php echo esc_html( sprintf( /* translators: %d: number of unique technical indicators in the formula */ __( 'Уникальные показатели, участвующие в расчёте осей по текущей формуле из админки (%d). Иконки — как на вкладке «Обзор»; в подписи — оси F–Ct, где показатель используется.', 'worldstat-ergonomics' ), (int) $n_formula_signals ) ); ?></p>
+							<div class="wsergo-macro-formula-scroll">
+								<ul class="wsergo-macro-kv wsergo-macro-kv--formula" role="list">
+									<?php
+									foreach ( $signal_axes_map as $sig_map => $ax_keys_set ) :
+										$axes_for_sig = array_keys( $ax_keys_set );
+										usort(
+											$axes_for_sig,
+											static function ( $a, $b ) use ( $axis_order ) {
+												$ia = array_search( $a, $axis_order, true );
+												$ib = array_search( $b, $axis_order, true );
+												$ia = false === $ia ? 99 : (int) $ia;
+												$ib = false === $ib ? 99 : (int) $ib;
+												return $ia <=> $ib;
+											}
+										);
+										$axes_str    = implode( ', ', $axes_for_sig );
+										$dec_formula = self::macro_raw_metric_decimals( $sig_map );
+										$icon_formula = self::macro_raw_metric_icon( $sig_map );
+										?>
+									<li class="wsergo-macro-kv__row" role="listitem">
+										<span class="wsergo-macro-kv__icon dashicons dashicons-<?php echo esc_attr( $icon_formula ); ?>" aria-hidden="true"></span>
+										<span class="wsergo-macro-kv__body">
+											<span class="wsergo-macro-kv__label"><?php echo esc_html( $dn( $sig_map ) ); ?></span>
+											<?php if ( $axes_str !== '' ) : ?>
+											<span class="wsergo-macro-kv__meta"><?php echo esc_html( sprintf( /* translators: %s: comma-separated axis codes like F, Cm */ __( 'Оси: %s', 'worldstat-ergonomics' ), $axes_str ) ); ?></span>
+											<?php endif; ?>
+										</span>
+										<span class="wsergo-macro-kv__val"><?php echo esc_html( $fmt( $raw[ $sig_map ] ?? null, $dec_formula ) ); ?></span>
+									</li>
+									<?php endforeach; ?>
+								</ul>
+							</div>
+						</div>
 					</div>
 				</div>
 				<script>
